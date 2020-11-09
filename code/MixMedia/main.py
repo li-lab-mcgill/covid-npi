@@ -15,7 +15,7 @@ import scipy.io
 import json
 import time
 
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 import data 
 
@@ -1065,6 +1065,50 @@ def get_cnpi_auprcs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
         return np.array([compute_auprc_breakdown(cnpis_masked[source_idx, :, :], \
             predictions_masked[source_idx, :, :], average='micro') for source_idx in range(cnpis_masked.shape[0])])
 
+def compute_auroc_breakdown(labels, predictions, average=None):
+    '''
+    inputs:
+    - labels: tensor, (number of samples, number of classes)
+    - predictions: tensor, (number of samples, number of classes)
+    - average: None or str, whether to take the average
+    output:
+    - aurocs: array, (number of classes) if average is None, or scalar otherwise
+    '''
+    # remove ones without positive labels
+    has_pos_labels = labels.sum(1) != 0
+    labels = labels[has_pos_labels, :]
+    predictions = predictions[has_pos_labels, :]
+    
+    labels = labels.cpu().numpy()
+    if labels.size == 0:    # empty
+        return np.nan
+    predictions = predictions.cpu().numpy()
+    return roc_auc_score(labels, predictions, average=average)
+
+def get_cnpi_aurocs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
+    assert mode in ['val', 'test'], 'mode must be val or test'
+    assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
+
+    with torch.no_grad():
+        eta = get_eta(mode)
+        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        if args.use_cnpi_lstm:
+            predictions = model.cnpi_lstm(cnpi_input)[0]
+        else:
+            predictions = cnpi_input
+        predictions = model.cnpi_out(predictions)
+        cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
+        cnpis_masked = cnpis * cnpi_mask
+        predictions_masked = torch.sigmoid(predictions * cnpi_mask)
+
+    if breakdown_by == 'measure':
+        return compute_auroc_breakdown(cnpis_masked.reshape(-1, cnpis_masked.shape[-1]), \
+            predictions_masked.reshape(-1, predictions_masked.shape[-1]))
+    else:
+        return np.array([compute_auroc_breakdown(cnpis_masked[source_idx, :, :], \
+            predictions_masked[source_idx, :, :], average='micro') for source_idx in range(cnpis_masked.shape[0])])
+
 if args.mode == 'train':
     ## train model on data by looping through multiple epochs
     best_epoch = 0
@@ -1303,6 +1347,20 @@ if args.predict_cnpi:
     with open(os.path.join(ckpt, 'val_cnpi_auprcs_source.json'), 'w') as file:
         json.dump(val_cnpi_auprcs_breakdown_source_out, file)
 
+    # auroc breakdown by measure
+    val_cnpi_aurocs_breakdown = get_cnpi_aurocs(cnpis, cnpi_mask, 'val')
+    val_cnpi_aurocs_breakdown_out = {label_idx_to_label[label_idx]: val_cnpi_aurocs_breakdown[label_idx] \
+            for label_idx, auroc in enumerate(val_cnpi_aurocs_breakdown) if not np.isnan(auroc)}
+    with open(os.path.join(ckpt, 'val_cnpi_aurocs.json'), 'w') as file:
+        json.dump(val_cnpi_aurocs_breakdown_out, file)
+
+    # auroc breakdown by source
+    val_cnpi_aurocs_breakdown_source = get_cnpi_aurocs(cnpis, cnpi_mask, 'val', breakdown_by='source')
+    val_cnpi_aurocs_breakdown_source_out = {source_idx_to_source[source_idx]: val_cnpi_aurocs_breakdown_source[source_idx] \
+            for source_idx, auroc in enumerate(val_cnpi_aurocs_breakdown_source) if not np.isnan(auroc)}
+    with open(os.path.join(ckpt, 'val_cnpi_aurocs_source.json'), 'w') as file:
+        json.dump(val_cnpi_aurocs_breakdown_source_out, file)
+
 print('computing test perplexity...')
 test_ppl, test_pdl = get_completion_ppl('test')
 
@@ -1375,6 +1433,20 @@ if args.predict_cnpi:
             for source_idx, auprc in enumerate(test_cnpi_auprcs_breakdown_source) if not np.isnan(auprc)}
     with open(os.path.join(ckpt, 'test_cnpi_auprcs_source.json'), 'w') as file:
         json.dump(test_cnpi_auprcs_breakdown_source_out, file)
+
+    # auroc breakdown by measure
+    test_cnpi_aurocs_breakdown = get_cnpi_aurocs(cnpis, cnpi_mask, 'test')
+    test_cnpi_aurocs_breakdown_out = {label_idx_to_label[label_idx]: test_cnpi_aurocs_breakdown[label_idx] \
+            for label_idx, auroc in enumerate(test_cnpi_aurocs_breakdown) if not np.isnan(auroc)}
+    with open(os.path.join(ckpt, 'test_cnpi_aurocs.json'), 'w') as file:
+        json.dump(test_cnpi_aurocs_breakdown_out, file)
+
+    # auroc breakdown by source
+    test_cnpi_aurocs_breakdown_source = get_cnpi_aurocs(cnpis, cnpi_mask, 'test', breakdown_by='source')
+    test_cnpi_aurocs_breakdown_source_out = {source_idx_to_source[source_idx]: test_cnpi_aurocs_breakdown_source[source_idx] \
+            for source_idx, auroc in enumerate(test_cnpi_aurocs_breakdown_source) if not np.isnan(auroc)}
+    with open(os.path.join(ckpt, 'test_cnpi_aurocs_source.json'), 'w') as file:
+        json.dump(test_cnpi_aurocs_breakdown_source_out, file)
 
 f=open(os.path.join(ckpt, 'test_ppl.txt'),'w')
 f.write(str(test_ppl))
