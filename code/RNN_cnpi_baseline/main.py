@@ -172,12 +172,19 @@ if __name__ == '__main__':
     model = RNN_CNPI_BaseModel(configs)
 
     # train
-    tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
+    # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
+    tags = ["RNN baseline", args.dataset]
+    wb_logger = pl_loggers.WandbLogger(
+        name=f"{time_stamp}",
+        project="covid",
+        tags=tags,
+        )
+    wb_logger.log_hyperparams(args)
     trainer = pl.Trainer(
         gradient_clip_val=args.clip, 
         max_epochs=args.epochs, 
         gpus=1, 
-        logger=tb_logger,
+        logger=wb_logger,
         weights_save_path=os.path.join(configs['save_path'], time_stamp)
         )
     trainer.fit(model, data_module)
