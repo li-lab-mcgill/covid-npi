@@ -11,3 +11,4 @@ code/RNN_cnpi_baseline/lightning_logs/*
 code/MixMedia_old/wandb/*
 code/MixMedia/wandb/*
 code/RNN_cnpi_baseline/wandb/*
+code/RNN_eta/wandb/*
