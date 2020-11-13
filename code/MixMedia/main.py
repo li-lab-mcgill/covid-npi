@@ -14,6 +14,7 @@ import random
 import scipy.io
 import json
 import time
+from itertools import compress
 
 from sklearn.metrics import average_precision_score, roc_auc_score
 
@@ -36,6 +37,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 # w & b
 import wandb
+
+# captum for IG
+from captum.attr import IntegratedGradients
 
 time_stamp = time.strftime("%m-%d-%H-%M", time.localtime())
 print(f"Experiment time stamp: {time_stamp}")
@@ -163,6 +167,7 @@ if args.mode == 'train':
     if args.logger == 'tb':
         writer = SummaryWriter(f"runs/{time_stamp}")
     else:
+        # tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset, "Use alpha embeddings"]
         tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset]
         if args.predict_cnpi:
             tags.append('Country NPI')
@@ -884,6 +889,18 @@ def compute_top_k_recall(labels, predictions, k=5, breakdown_by=None):
 #             predictions_masked.reshape(-1, predictions_masked.shape[-1]), 10)],
 #         }
 
+def get_cnpi_predictions(mode):
+    eta = get_eta(mode)
+    label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+    cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+    if args.use_cnpi_lstm:
+        # cnpi_input = torch.softmax(cnpi_input, dim=-1)
+        # cnpi_input = torch.matmul(cnpi_input, model.mu_q_alpha)
+        predictions = model.cnpi_lstm(cnpi_input)[0]
+    else:
+        predictions = cnpi_input
+    return model.cnpi_out(predictions)
+
 def get_cnpi_top_k_metrics(cnpis, cnpi_mask, mode, return_vals=['recall', 'precision', 'f1'], breakdown_by=None):
     assert mode in ['val', 'test'], 'mode must be val or test'
     assert all([return_val in ['recall', 'precision', 'f1'] for return_val in return_vals]), \
@@ -891,14 +908,15 @@ def get_cnpi_top_k_metrics(cnpis, cnpi_mask, mode, return_vals=['recall', 'preci
     assert return_vals, 'no return value is specified'
 
     with torch.no_grad():
-        eta = get_eta(mode)
-        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
-        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
-        if args.use_cnpi_lstm:
-            predictions = model.cnpi_lstm(cnpi_input)[0]
-        else:
-            predictions = cnpi_input
-        predictions = model.cnpi_out(predictions)
+        # eta = get_eta(mode)
+        # label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        # cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        # if args.use_cnpi_lstm:
+        #     predictions = model.cnpi_lstm(cnpi_input)[0]
+        # else:
+        #     predictions = cnpi_input
+        # predictions = model.cnpi_out(predictions)
+        predictions = get_cnpi_predictions(mode)
         cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
         cnpis_masked = cnpis * cnpi_mask
         predictions_masked = predictions * cnpi_mask    # taking indices only so not computing sigmoid
@@ -1046,14 +1064,15 @@ def get_cnpi_auprcs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
     assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
 
     with torch.no_grad():
-        eta = get_eta(mode)
-        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
-        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
-        if args.use_cnpi_lstm:
-            predictions = model.cnpi_lstm(cnpi_input)[0]
-        else:
-            predictions = cnpi_input
-        predictions = model.cnpi_out(predictions)
+        # eta = get_eta(mode)
+        # label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        # cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        # if args.use_cnpi_lstm:
+        #     predictions = model.cnpi_lstm(cnpi_input)[0]
+        # else:
+        #     predictions = cnpi_input
+        # predictions = model.cnpi_out(predictions)
+        predictions = get_cnpi_predictions(mode)
         cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
         cnpis_masked = cnpis * cnpi_mask
         predictions_masked = torch.sigmoid(predictions * cnpi_mask)
@@ -1090,14 +1109,15 @@ def get_cnpi_aurocs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
     assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
 
     with torch.no_grad():
-        eta = get_eta(mode)
-        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
-        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
-        if args.use_cnpi_lstm:
-            predictions = model.cnpi_lstm(cnpi_input)[0]
-        else:
-            predictions = cnpi_input
-        predictions = model.cnpi_out(predictions)
+        # eta = get_eta(mode)
+        # label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        # cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        # if args.use_cnpi_lstm:
+        #     predictions = model.cnpi_lstm(cnpi_input)[0]
+        # else:
+        #     predictions = cnpi_input
+        # predictions = model.cnpi_out(predictions)
+        predictions = get_cnpi_predictions(mode)
         cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
         cnpis_masked = cnpis * cnpi_mask
         predictions_masked = torch.sigmoid(predictions * cnpi_mask)
@@ -1108,6 +1128,36 @@ def get_cnpi_aurocs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
     else:
         return np.array([compute_auroc_breakdown(cnpis_masked[source_idx, :, :], \
             predictions_masked[source_idx, :, :], average='micro') for source_idx in range(cnpis_masked.shape[0])])
+
+def get_cnpi_attribution(cnpis, cnpi_mask, mode):
+    assert mode in ['val', 'test'], 'mode must be val or test'
+    assert args.use_cnpi_lstm, 'not using CNPI LSTM'
+
+    with torch.no_grad():
+        eta = get_eta(mode)
+        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+
+
+        eta = get_eta(mode)
+        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+
+        def _get_prediction(cnpi_input):
+            predictions = model.cnpi_lstm(cnpi_input)[0]
+            return torch.sigmoid(model.cnpi_out(predictions))
+
+        ig = IntegratedGradients(_get_prediction)
+
+        baselines = torch.log(torch.ones_like(cnpi_input) / cnpi_input.shape[-1])   # uniform topic distributions
+        attributions = ig.attribute(cnpi_input, target=cnpis, baselines=baselines, \
+            return_convergence_delta=False)
+
+        attributions = attributions.reshape(-1, cnpi_input.shape[-1])
+        cnpi_mask = cnpi_mask[:, :, 0].squeeze().reshape(cnpis.shape[0])   # use the unexpanded mask
+        attributions = torch.stack(list(compress(attributions, cnpi_mask)))
+
+    return attributions
 
 if args.mode == 'train':
     ## train model on data by looping through multiple epochs
@@ -1271,6 +1321,16 @@ if args.mode == 'train':
     with open(os.path.join(ckpt, 'config.json'), 'w') as file:
         json.dump(config_dict, file)
 
+print('saving evaluation eta ...')
+eta = get_eta('val').cpu().detach().numpy()
+# np.save(ckpt+'_eta.npy', eta, allow_pickle=False)
+np.save(os.path.join(ckpt, 'eta_eval.npy'), eta, allow_pickle=False)
+
+print('saving test eta ...')
+eta = get_eta('test').cpu().detach().numpy()
+# np.save(ckpt+'_eta.npy', eta, allow_pickle=False)
+np.save(os.path.join(ckpt, 'eta_test.npy'), eta, allow_pickle=False)
+
 print('computing validation perplexity...')
 val_ppl, val_pdl = get_completion_ppl('val')
 
@@ -1378,6 +1438,10 @@ if args.predict_labels:
         json.dump(test_doc_labels_results['f1'], file)
 
 if args.predict_cnpi:
+    # # IG for cnpi lstm
+    # attributions = get_cnpi_attribution(cnpis, cnpi_mask, 'test')
+    # raise Exception(attributions.shape)
+
     # cnpi top k recall on test set
     # test_cnpi_top_ks = get_cnpi_top_k_recall(cnpis, cnpi_mask, 'test')
     test_cnpi_results = get_cnpi_top_k_metrics(cnpis, cnpi_mask, 'test')

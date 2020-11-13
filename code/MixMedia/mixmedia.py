@@ -110,9 +110,10 @@ class MixMedia(nn.Module):
     
 
         ## define the variational parameters for the topic embeddings over time (alpha) ... alpha is K x L
-        self.mu_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size)).to(device)
-        self.logsigma_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size)).to(device)
-    
+        # self.mu_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size).detach()).to(device)
+        self.register_parameter(name='mu_q_alpha', param=nn.Parameter(torch.randn(args.num_topics, args.rho_size)))
+        # self.logsigma_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size)).to(device)
+        self.register_parameter(name='logsigma_q_alpha', param=nn.Parameter(torch.randn(args.num_topics, args.rho_size)))
     
         ## define variational distribution for \theta_{1:D} via amortizartion... theta is K x D
         # self.q_theta = nn.Sequential(
@@ -172,6 +173,8 @@ class MixMedia(nn.Module):
         # predicting country-level npi
         if self.predict_cnpi:
             cnpi_input_size = args.num_topics + args.num_cnpis if self.use_doc_labels else args.num_topics
+            # testing embedding topics with alpha
+            # cnpi_input_size = args.rho_size + args.num_cnpis if self.use_doc_labels else args.rho_size
             if self.use_cnpi_lstm:
                 self.cnpi_lstm = nn.LSTM(cnpi_input_size, hidden_size=self.cnpi_hidden_size, \
                     bidirectional=False, dropout=self.cnpi_drop, num_layers=self.cnpi_layers, batch_first=True).to(device)
@@ -381,6 +384,8 @@ class MixMedia(nn.Module):
         # this function is only called in training
         cnpi_input = torch.cat([eta, cnpi_data['train_labels']], dim=-1) if self.use_doc_labels else eta
         if self.use_cnpi_lstm:
+            # cnpi_input = torch.softmax(cnpi_input, dim=-1)
+            # cnpi_input = torch.matmul(cnpi_input, self.mu_q_alpha)
             predictions = self.cnpi_lstm(cnpi_input)[0]
         else:
             predictions = cnpi_input
