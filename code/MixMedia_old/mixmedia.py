@@ -110,8 +110,10 @@ class MixMedia(nn.Module):
     
 
         ## define the variational parameters for the topic embeddings over time (alpha) ... alpha is K x L
-        self.mu_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size)).to(device)
-        self.logsigma_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size)).to(device)
+        # self.mu_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size).detach()).to(device)
+        self.register_parameter(name='mu_q_alpha', param=nn.Parameter(torch.randn(args.num_topics, args.rho_size)))
+        # self.logsigma_q_alpha = nn.Parameter(torch.randn(args.num_topics, args.rho_size)).to(device)
+        self.register_parameter(name='logsigma_q_alpha', param=nn.Parameter(torch.randn(args.num_topics, args.rho_size)))
     
     
         ## define variational distribution for \theta_{1:D} via amortizartion... theta is K x D
