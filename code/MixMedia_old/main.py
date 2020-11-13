@@ -1256,6 +1256,16 @@ if args.mode == 'train':
     with open(os.path.join(ckpt, 'config.json'), 'w') as file:
         json.dump(config_dict, file)
 
+print('saving evaluation eta ...')
+eta = get_eta('val').cpu().detach().numpy()
+# np.save(ckpt+'_eta.npy', eta, allow_pickle=False)
+np.save(os.path.join(ckpt, 'eta_eval.npy'), eta, allow_pickle=False)
+
+print('saving test eta ...')
+eta = get_eta('test').cpu().detach().numpy()
+# np.save(ckpt+'_eta.npy', eta, allow_pickle=False)
+np.save(os.path.join(ckpt, 'eta_test.npy'), eta, allow_pickle=False)
+
 print('computing validation perplexity...')
 val_ppl, val_pdl = get_completion_ppl('val')
 
