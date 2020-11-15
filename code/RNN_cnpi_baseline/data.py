@@ -126,7 +126,7 @@ class COVID_Data_Module(pl.LightningDataModule):
         # get num_times and num_sources
         all_timestamps = pickle.load(open(os.path.join(self.path, 'timestamps.pkl'), 'rb'))
         num_times = len(all_timestamps)
-        num_sources = len(source_to_idx)
+        self.num_sources = len(source_to_idx)
 
         # construct dicts of time stamps and docs
         source_to_timestamp_to_tokens = {}
@@ -159,12 +159,19 @@ class COVID_Data_Module(pl.LightningDataModule):
 
         # construct training and validation datasets
         self.train_dataset = COVID_Dataset(source_to_timestamp_to_tokens, source_to_timestamp_to_counts, \
-            cnpis, cnpi_mask, self.configs['vocab_size'], num_times, num_sources)
+            cnpis, cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
         self.eval_dataset = COVID_Dataset(source_to_timestamp_to_tokens, source_to_timestamp_to_counts, \
-            cnpis, 1 - cnpi_mask, self.configs['vocab_size'], num_times, num_sources)
+            cnpis, 1 - cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
+        self.test_dataset = COVID_Dataset(source_to_timestamp_to_tokens, source_to_timestamp_to_counts, \
+            cnpis, 1 - cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.eval_dataset, batch_size=self.configs['batch_size'], shuffle=True)
+        # evaluate all countries at once
+        return DataLoader(self.eval_dataset, batch_size=self.num_sources, shuffle=False)
+    
+    def test_dataloader(self):
+        # evaluate all countries at once
+        return DataLoader(self.test_dataset, batch_size=self.num_sources, shuffle=False)
