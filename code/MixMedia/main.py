@@ -16,7 +16,7 @@ import json
 import time
 from itertools import compress
 
-from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_curve
 
 import data 
 
@@ -106,6 +106,7 @@ parser.add_argument('--cnpi_drop', type=float, default=0.1, help='dropout rate f
 parser.add_argument('--cnpi_layers', type=int, default=1, help='number of layers for country npi lstm')
 parser.add_argument('--use_doc_labels', type=int, default=0, help='whether to use document labels as input for cnpi prediction (default 0)')
 parser.add_argument('--use_cnpi_lstm', type=int, default=1, help='whether to use lstm (default 1)')
+parser.add_argument('--use_eta_lstm', type=int, default=0, help='whether to use eta lstm instead of another lstm (default 0)')
 parser.add_argument('--tie_clf', type=int, default=0, help='whether to tie the weights of document and country classifiers (default 0)')
 
 ### optimization-related arguments
@@ -160,6 +161,9 @@ if args.tie_clf:
     if args.use_cnpi_lstm:
         raise Exception('using lstm for country NPI prediction. cannot tie weights of a linear classifier and a lstm.')
 
+if args.use_eta_lstm and args.use_cnpi_lstm:
+    raise Exception('either use eta lstm or cnpi lstm')
+
 # initialize logger
 if args.mode == 'train':
     logger_name = "tensorboard" if args.logger == 'tb' else "wandb"
@@ -167,8 +171,8 @@ if args.mode == 'train':
     if args.logger == 'tb':
         writer = SummaryWriter(f"runs/{time_stamp}")
     else:
-        # tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset, "Use alpha embeddings"]
-        tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset]
+        tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset, "Use alpha embeddings"]
+        # tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset]
         if args.predict_cnpi:
             tags.append('Country NPI')
         if args.predict_labels:
@@ -570,7 +574,7 @@ def visualize():
 
 
 
-def _eta_helper(rnn_inp):
+def _eta_helper(rnn_inp, return_q_eta_out=False):
 
     etas = torch.zeros(model.num_sources, model.num_times, model.num_topics).to(device)
     inp = model.q_eta_map(rnn_inp.view(rnn_inp.size(0)*rnn_inp.size(1), -1)).view(rnn_inp.size(0),rnn_inp.size(1),-1)
@@ -583,19 +587,22 @@ def _eta_helper(rnn_inp):
         inp_t = torch.cat([output[:,t,:], etas[:, t-1, :]], dim=1)
         etas[:, t, :] = model.mu_q_eta(inp_t)
     
-    return etas
+    if return_q_eta_out:
+        return etas, output
+    else:
+        return etas
 
-def get_eta(data_type):
+def get_eta(data_type, return_q_eta_out=False):
     model.eval()
     with torch.no_grad():
         if data_type == 'val':
             rnn_inp = valid_rnn_inp
-            return _eta_helper(rnn_inp)
+            return _eta_helper(rnn_inp, return_q_eta_out)
         elif data_type == 'test':
             rnn_1_inp = test_1_rnn_inp
-            return _eta_helper(rnn_1_inp)
+            return _eta_helper(rnn_1_inp, return_q_eta_out)
         elif data_type == 'train':
-            return _eta_helper(train_rnn_inp)
+            return _eta_helper(train_rnn_inp, return_q_eta_out)
         else:
             raise Exception('invalid data_type: '.data_type)
 
@@ -890,13 +897,18 @@ def compute_top_k_recall(labels, predictions, k=5, breakdown_by=None):
 #         }
 
 def get_cnpi_predictions(mode):
-    eta = get_eta(mode)
+    if args.use_eta_lstm:
+        eta, q_eta_out = get_eta(mode, return_q_eta_out=True)
+    else:
+        eta = get_eta(mode)
     label_key = 'valid_labels' if mode == 'val' else 'test_labels'
     cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
     if args.use_cnpi_lstm:
         # cnpi_input = torch.softmax(cnpi_input, dim=-1)
         # cnpi_input = torch.matmul(cnpi_input, model.mu_q_alpha)
         predictions = model.cnpi_lstm(cnpi_input)[0]
+    elif args.use_eta_lstm:
+        predictions = q_eta_out
     else:
         predictions = cnpi_input
     return model.cnpi_out(predictions)
@@ -1159,6 +1171,52 @@ def get_cnpi_attribution(cnpis, cnpi_mask, mode):
 
     return attributions
 
+def compute_prc_curves(labels, predictions, average=None):
+    '''
+    inputs:
+    - labels: tensor, (number of samples, number of classes)
+    - predictions: tensor, (number of samples, number of classes)
+    - average: None or str, whether to take the average
+    output:
+    - precisions: dictionary, {label index: precision scores}
+    - recalls: dictionary, {label index: recall scores}
+    '''
+    # remove ones without positive labels
+    has_pos_labels = labels.sum(1) != 0
+    labels = labels[has_pos_labels, :]
+    predictions = predictions[has_pos_labels, :]
+    
+    labels = labels.cpu().numpy()
+    if labels.size == 0:    # empty
+        return np.nan
+    predictions = predictions.cpu().numpy()
+
+    precisions = []
+    recalls = []
+    for idx in range(labels.shape[-1]):
+        precision, recall, _ = precision_recall_curve(labels[:, idx], predictions[:, idx])
+        precisions.append(precision)
+        recalls.append(recall)
+
+    return precisions, recalls
+
+def get_precision_recall_curve(cnpis, cnpi_mask, mode, breakdown_by='measure'):
+    assert mode in ['val', 'test'], 'mode must be val or test'
+    assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
+
+    with torch.no_grad():
+        predictions = get_cnpi_predictions(mode)
+        cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
+        cnpis_masked = cnpis * cnpi_mask
+        predictions_masked = torch.sigmoid(predictions * cnpi_mask)
+
+    if breakdown_by == 'measure':
+        return compute_prc_curves(cnpis_masked.reshape(-1, cnpis_masked.shape[-1]), \
+            predictions_masked.reshape(-1, predictions_masked.shape[-1]))
+    else:
+        return {source_idx: compute_prc_curves(cnpis_masked[source_idx, :, :], \
+            predictions_masked[source_idx, :, :], average='micro') for source_idx in range(cnpis_masked.shape[0])}
+
 if args.mode == 'train':
     ## train model on data by looping through multiple epochs
     best_epoch = 0
@@ -1315,6 +1373,7 @@ if args.predict_cnpi:
     config_dict['cnpi_layers'] = args.cnpi_layers
     config_dict['use_doc_labels'] = args.use_doc_labels
     config_dict['use_cnpi_lstm'] = args.use_cnpi_lstm
+    config_dict['use_eta_lstm'] = args.use_eta_lstm
     config_dict['tie_clf'] = args.tie_clf
 
 if args.mode == 'train':
@@ -1511,6 +1570,20 @@ if args.predict_cnpi:
             for source_idx, auroc in enumerate(test_cnpi_aurocs_breakdown_source) if not np.isnan(auroc)}
     with open(os.path.join(ckpt, 'test_cnpi_aurocs_source.json'), 'w') as file:
         json.dump(test_cnpi_aurocs_breakdown_source_out, file)
+
+    # precision-recall curves breakdown by measure
+    test_cnpi_precisions_breakdown, test_cnpi_recalls_breakdown = \
+        get_precision_recall_curve(cnpis, cnpi_mask, 'test')
+    np.save(os.path.join(ckpt, 'test_cnpi_precisions.npy'), test_cnpi_precisions_breakdown)
+    np.save(os.path.join(ckpt, 'test_cnpi_recalls.npy'), test_cnpi_recalls_breakdown)
+    # test_cnpi_precisions_breakdown_out = {label_idx_to_label[label_idx]: precision \
+    #         for label_idx, precision in test_cnpi_precisions_breakdown.items()}
+    # test_cnpi_recalls_breakdown_out = {label_idx_to_label[label_idx]: recall \
+    #         for label_idx, recall in test_cnpi_recalls_breakdown.items()}
+    # with open(os.path.join(ckpt, 'test_cnpi_precisions.json'), 'w') as file:
+    #     json.dump(test_cnpi_precisions_breakdown_out, file)
+    # with open(os.path.join(ckpt, 'test_cnpi_recalls.json'), 'w') as file:
+    #     json.dump(test_cnpi_recalls_breakdown_out, file)
 
 f=open(os.path.join(ckpt, 'test_ppl.txt'),'w')
 f.write(str(test_ppl))

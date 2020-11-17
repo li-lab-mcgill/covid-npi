@@ -98,6 +98,7 @@ class MixMedia(nn.Module):
         self.num_cnpis = args.num_cnpis
         self.use_doc_labels = args.use_doc_labels
         self.use_cnpi_lstm = args.use_cnpi_lstm
+        self.use_eta_lstm = args.use_eta_lstm
 
         ## define the word embedding matrix \rho: L x V
         if args.train_embeddings:
@@ -179,6 +180,8 @@ class MixMedia(nn.Module):
                 self.cnpi_lstm = nn.LSTM(cnpi_input_size, hidden_size=self.cnpi_hidden_size, \
                     bidirectional=False, dropout=self.cnpi_drop, num_layers=self.cnpi_layers, batch_first=True).to(device)
                 self.cnpi_out = nn.Linear(self.cnpi_hidden_size, args.num_cnpis, bias=True).to(device)
+            elif self.use_eta_lstm:
+                self.cnpi_out = nn.Linear(self.eta_hidden_size, args.num_cnpis, bias=True).to(device)
             else:
                 if args.tie_clf:
                     self.cnpi_out = self.classifier
@@ -292,7 +295,7 @@ class MixMedia(nn.Module):
             kl_eta.append(kl_t)
 
         kl_eta = torch.stack(kl_eta).sum()
-        return etas, kl_eta
+        return etas, kl_eta, output
 
 
 
@@ -373,7 +376,7 @@ class MixMedia(nn.Module):
 
         return pred_loss    
 
-    def get_cnpi_prediction_loss(self, eta, cnpi_data):
+    def get_cnpi_prediction_loss(self, eta, cnpi_data, q_eta_out):
         # get unique combinations of (source, time) as indices
         # indices = torch.tensor(list(dict.fromkeys(list(zip(sources.tolist(), times.tolist())))), dtype=torch.long)
         # get corresponding etas
@@ -387,6 +390,8 @@ class MixMedia(nn.Module):
             # cnpi_input = torch.softmax(cnpi_input, dim=-1)
             # cnpi_input = torch.matmul(cnpi_input, self.mu_q_alpha)
             predictions = self.cnpi_lstm(cnpi_input)[0]
+        elif self.use_eta_lstm:
+            predictions = q_eta_out
         else:
             predictions = cnpi_input
         # predictions = torch.max(predictions, dim=1)[0]
@@ -399,7 +404,7 @@ class MixMedia(nn.Module):
         coeff = num_docs / bsz
         alpha, kl_alpha = self.get_alpha()
         
-        eta, kl_eta = self.get_eta(rnn_inp)
+        eta, kl_eta, q_eta_out = self.get_eta(rnn_inp)
 
         theta, kl_theta = self.get_theta(eta, embs, att_mask, times, sources)
         # theta, kl_theta = self.get_theta(eta, normalized_bows, times, sources)
@@ -423,7 +428,7 @@ class MixMedia(nn.Module):
             nelbo = nll + kl_alpha + kl_eta + kl_theta
 
         if self.predict_cnpi:
-            cnpi_pred_loss = self.get_cnpi_prediction_loss(eta, cnpi_data)
+            cnpi_pred_loss = self.get_cnpi_prediction_loss(eta, cnpi_data, q_eta_out)
             nelbo += cnpi_pred_loss
         
         return nelbo, nll, kl_alpha, kl_eta, kl_theta, pred_loss, cnpi_pred_loss
