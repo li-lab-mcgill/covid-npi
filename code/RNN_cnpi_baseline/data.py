@@ -161,9 +161,9 @@ class COVID_Data_Module(pl.LightningDataModule):
         self.train_dataset = COVID_Dataset(source_to_timestamp_to_tokens, source_to_timestamp_to_counts, \
             cnpis, cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
         self.eval_dataset = COVID_Dataset(source_to_timestamp_to_tokens, source_to_timestamp_to_counts, \
-            cnpis, 1 - cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
+            cnpis, cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
         self.test_dataset = COVID_Dataset(source_to_timestamp_to_tokens, source_to_timestamp_to_counts, \
-            cnpis, 1 - cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
+            cnpis, cnpi_mask, self.configs['vocab_size'], num_times, self.num_sources)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True)

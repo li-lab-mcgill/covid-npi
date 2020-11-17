@@ -36,6 +36,7 @@ def parse_args():
 
     # model configs
     parser.add_argument('--seed', type=int, default=2020, help='random seed (default: 1)')
+    parser.add_argument('--bi_dir', action='store_true', help='use bi-directional lstm')
     parser.add_argument('--map_size', type=int, default=300, help='dimension of mapping')
     parser.add_argument('--hidden_size', type=int, default=128, help='rnn hidden size')
     parser.add_argument('--dropout', type=float, default=0.1, help='dropout rate')
@@ -51,10 +52,12 @@ class RNN_CNPI_BaseModel(pl.LightningModule):
 
         self.mapping = nn.Linear(self.configs['vocab_size'], self.configs['map_size'])
 
-        self.rnn = nn.LSTM(self.configs['map_size'], hidden_size=self.configs['hidden_size'], bidirectional=False, \
+        self.rnn = nn.LSTM(self.configs['map_size'], hidden_size=self.configs['hidden_size'], bidirectional=self.configs["bi_dir"], \
             dropout=self.configs['dropout'], num_layers=self.configs['num_layers'], batch_first=True)
 
-        self.rnn_out = nn.Linear(self.configs['hidden_size'], self.configs['num_cnpis'], bias=True)
+        lstm_out_size = self.configs['hidden_size'] * 2 if self.configs["bi_dir"] else self.configs['hidden_size']
+        
+        self.rnn_out = nn.Linear(lstm_out_size, self.configs['num_cnpis'], bias=True)
 
     def forward(self, bows):
         # bows: batch_size x times_span x vocab_size
@@ -70,7 +73,7 @@ class RNN_CNPI_BaseModel(pl.LightningModule):
             'scheduler': scheduler,
             'reduce_on_plateau': True,
             # val_checkpoint_on is val_loss passed in as checkpoint_on
-            'monitor': 'val_checkpoint_on'
+            'monitor': 'val_loss'
             # 'monitor': 'val_loss'
         }
         return [optimizer], [scheduler]
@@ -111,9 +114,10 @@ class RNN_CNPI_BaseModel(pl.LightningModule):
 
         val_loss = F.binary_cross_entropy_with_logits(batch_predictions_masked, batch_labels_masked)
 
-        results = pl.EvalResult(checkpoint_on=val_loss)
-        results.log('val_loss', val_loss)
-        # self.logger.experiment.log({'val_loss': val_loss})
+        # results = pl.EvalResult(checkpoint_on=val_loss)
+        # results.log('val_loss', val_loss)
+        self.log_dict({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
+        self.logger.experiment.log({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
 
         top_k_recalls = {
             1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
@@ -125,8 +129,10 @@ class RNN_CNPI_BaseModel(pl.LightningModule):
             10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
                 batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10),
             }
-        results.log_dict({f"recall/{key}": value for key, value in top_k_recalls.items()})
-        # self.logger.experiment.log({f"recall/{key}": value for key, value in top_k_recalls.items()})
+        top_k_recalls_log = {f"recall/{key}": value for key, value in top_k_recalls.items()}
+        top_k_recalls_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+        # self.log_dict(top_k_recalls_log)
+        self.logger.experiment.log(top_k_recalls_log)
         top_k_precs = {
             1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
                 batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 1, 'prec'),
@@ -137,15 +143,19 @@ class RNN_CNPI_BaseModel(pl.LightningModule):
             10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
                 batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10, 'prec'),
             }
-        results.log_dict({f"prec/{key}": value for key, value in top_k_precs.items()})
-        # self.logger.experiment.log({f"prec/{key}": value for key, value in top_k_precs.items()})
+        top_k_precs_log = {f"prec/{key}": value for key, value in top_k_precs.items()}
+        top_k_precs_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+        # self.log_dict(top_k_precs_log)
+        self.logger.experiment.log(top_k_precs_log)
         top_k_f1s = {
             k: (2 * top_k_recalls[k] * top_k_precs[k]) / \
                 (top_k_recalls[k] + top_k_precs[k]) for k in [1, 3, 5, 10]
             }
-        results.log_dict({f"f1/{key}": value for key, value in top_k_f1s.items()})
-        # self.logger.experiment.log({f"f1/{key}": value for key, value in top_k_f1s.items()})
-        return results
+        top_k_f1s_log = {f"f1/{key}": value for key, value in top_k_f1s.items()}
+        top_k_f1s_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+        # self.log_dict(top_k_f1s_log)
+        self.logger.experiment.log(top_k_f1s_log)
+        # return results
 
     def compute_auprc_breakdown(self, labels, predictions, average=None):
         '''
@@ -244,6 +254,8 @@ if __name__ == '__main__':
     # train
     # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
     tags = ["RNN baseline", args.dataset]
+    if args.bi_dir:
+        tags.append("Bi-LSTM")
     if args.test:
         tags.append("Test")
 
@@ -266,3 +278,9 @@ if __name__ == '__main__':
         trainer.test()
     else:
         trainer.test(model, datamodule=data_module)
+        # save predictions
+        with torch.no_grad():
+            for data, _, _ in data_module.test_dataloader():
+                test_predictions = model(data.to(torch.device('cuda')))
+            # should be only 1 batch
+            torch.save(test_predictions, os.path.join(configs['save_path'], time_stamp, 'test_predictions.pt'))
