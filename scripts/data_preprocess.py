@@ -204,6 +204,7 @@ def get_args():
     parser.add_argument("--data_file_path", type=str, default='gphin_all_countries/gphin_all_sources.csv')
     parser.add_argument("--stopwords_path", type=str, default='stops.txt')
     parser.add_argument("--cnpi_labels_path", type=str)
+    parser.add_argument("--cnpi_mask_country", action='store_true')
     parser.add_argument("--save_dir", type=str, default='new_debug_results/')
     parser.add_argument('--who_flag',type=bool, default=False)
     parser.add_argument('--coronanet_flag',type=bool, default=False)
@@ -631,7 +632,7 @@ def get_features(init_timestamps, init_docs, stops, min_df=min_df, max_df=max_df
 #         return None
 #     return (np.sum(valid_label_vecs, axis=0) != 0).astype(int)
 
-def get_cnpis(countries_to_idx, time2id, labels_filename, label_map, label_harm):
+def get_cnpis(countries_to_idx, time2id, labels_filename, label_map, label_harm, mask_country):
     cnpis_df = pd.read_csv(labels_filename, index_col=0).dropna()
     cnpis_df.country_territory_area = cnpis_df.country_territory_area.apply(lambda text: text.lower())
     # only look at implementation of new measures
@@ -673,10 +674,15 @@ def get_cnpis(countries_to_idx, time2id, labels_filename, label_map, label_harm)
             except KeyError:
                 invalid_cnt += 1         
 
-    # randomly masking half for evaluation
-    mask = np.zeros(len(countries_to_idx) * len(time2id))
-    mask[:int(np.floor(mask.size / 2))] = 1
-    mask = np.random.permutation(mask).reshape((len(countries_to_idx), len(time2id)))
+    if not mask_country:
+        # randomly masking half for evaluation
+        mask = np.zeros(len(countries_to_idx) * len(time2id))
+        mask[:int(np.floor(mask.size / 2))] = 1
+        mask = np.random.permutation(mask).reshape((len(countries_to_idx), len(time2id)))
+    else:
+        # randomly masking half of all countries for evaluation
+        mask = np.zeros((len(countries_to_idx), len(time2id)))
+        mask[np.random.choice(mask.shape[0], int(0.5 * mask.shape[0]), replace=False), :] = 1
 
     return {'cnpis': cnpis, 'mask': mask}
 
@@ -1203,7 +1209,7 @@ if __name__ == '__main__':
 
     # get cnpis
     if args.cnpi_labels_path:
-        cnpi_data = get_cnpis(countries_to_idx, time2id, args.cnpi_labels_path, label_map, args.label_harm)
+        cnpi_data = get_cnpis(countries_to_idx, time2id, args.cnpi_labels_path, label_map, args.label_harm, args.cnpi_mask_country)
     else:
         cnpi_data = None
 
