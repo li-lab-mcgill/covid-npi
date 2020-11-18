@@ -227,9 +227,9 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
     indices = torch.randperm(num_docs)
     indices = torch.split(indices, 1000)
     
-    rnn_input = torch.zeros(num_sources, num_times, vocab_size).to(device)
+    rnn_input = torch.zeros(num_sources, num_times, vocab_size)
 
-    cnt = torch.zeros(num_sources, num_times, vocab_size).to(device)
+    cnt = torch.zeros(num_sources, num_times, vocab_size)
 
     for idx, ind in enumerate(indices):
         
@@ -252,7 +252,7 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
     
     rnn_input = (rnn_input + 1e-16) / (cnt + 1e-16)    
 
-    return rnn_input
+    return rnn_input.to(device)
 
 # get document labels to use as inputs for predicting cnpis
 def get_doc_labels_for_cnpi(labels, sources, times, num_sources, num_times, num_cnpis):
