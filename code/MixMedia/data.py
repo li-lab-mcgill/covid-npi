@@ -244,7 +244,7 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
                 else:
                     docs = data_batch[mask].squeeze().sum(0)
 
-                rnn_input[src,t] += docs
+                rnn_input[src,t] += docs.to(torch.device('cpu'))
                 cnt[src,t] += len(mask)
 
         if idx % 10 == 0:
