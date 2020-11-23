@@ -154,6 +154,62 @@ who_harm_dict = {
     '8.5_Other measures__Other': 'Other measures'
  }
 
+aylien_country_code_to_name = {
+    'US': 'united states of america',
+    'AU': 'australia',
+    'IN': 'india',
+    'NZ': 'new zealand',
+    'PH': 'philippines',
+    'GB': 'united kingdom of great britain and northern ireland',
+    'CA': 'canada',
+    'IT': 'italy',
+    'RU': 'russian federation',
+    'IE': 'ireland',
+    'KR': 'republic of korea',
+    'DE': 'germany',
+    'CN': 'china',
+    'ES': 'spain',
+    'JP': 'japan',
+    'GH': 'ghana',
+    'HK': None,
+    'KE': 'kenya',
+    'NG': 'nigeria',
+    'FR': 'france',
+    'ZA': 'south africa',
+    'MX': 'mexico',
+    'UA': 'ukraine',
+    'IL': 'israel',
+    'PK': 'pakistan',
+    'IR': 'iran, islamic republic of',
+    'FI': 'finland',
+    'BE': 'belgium',
+    'MT': 'malta',
+    'SV': 'el salvador',
+    'MM': 'myanmar',
+    'DO': 'dominican republic',
+    'NL': 'netherlands',
+    'PT': 'portugal',
+    'LU': 'luxembourg',
+    'ID': 'indonesia',
+    'AR': 'argentina',
+    'MA': 'morocco',
+    'EC': 'ecuador',
+    'BR': 'brazil',
+    'TW': None,
+    'CH': 'switzerland',
+    'TN': 'tunisia',
+}
+
+dataset_to_text_colnames = {
+    'who': 'SUMMARY',
+    'aylien': 'body'
+}
+
+dataset_to_timestamp_colnames = {
+    'who': 'DATE ADDED',
+    'aylien': 'published_at'
+}
+
 who_ids = []
 
 def pickle_save(filename, data):
@@ -208,6 +264,7 @@ def get_args():
     parser.add_argument("--save_dir", type=str, default='new_debug_results/')
     parser.add_argument('--who_flag',type=bool, default=False)
     parser.add_argument('--coronanet_flag',type=bool, default=False)
+    parser.add_argument('--aylien_flag',type=bool, default=False)
     parser.add_argument('--label_harm', type=bool, default=False, help='whether to use harmonized labels (default false)')
     parser.add_argument("--full_data", type=bool, default=False)
     return parser.parse_args()
@@ -246,7 +303,7 @@ def get_week_of_month(year, month, day):
     week_of_month = np.where(x==day)[0][0] + 1
     return(week_of_month) 
 
-def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, label_harm=False):
+def read_data(data_file, dataset, full_data=False, label_harm=False):
     # Read data
     print('reading data...')
     print(data_file)
@@ -260,8 +317,8 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
     calendar.setfirstweekday(6) #First weekday is Sunday
 
     # remove null values from data
-    gphin_data = gphin_data[gphin_data['SUMMARY'].notna()]
-    gphin_data = gphin_data[gphin_data['SUMMARY'].apply(lambda text: text.lower()) != 'none']   # remove "NONE" entries
+    gphin_data = gphin_data[gphin_data[dataset_to_text_colnames[dataset]].notna()]
+    gphin_data = gphin_data[gphin_data[dataset_to_text_colnames[dataset]].apply(lambda text: text.lower()) != 'none']   # remove "NONE" entries
 
     #Keep only english words in the data
     # all_words = []
@@ -269,26 +326,39 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
     #     # en_summary = " ".join(w for w in nltk.wordpunct_tokenize(str(summary)) if w.lower() in words or not w.isalpha())
     #     en_summary = get_en_words(summary, words)
     #     all_words.append(en_summary)
-    gphin_data['SUMMARY'] = gphin_data['SUMMARY'].apply(lambda summary: get_en_words(summary, words))
+    gphin_data[dataset_to_text_colnames[dataset]] = \
+        gphin_data[dataset_to_text_colnames[dataset]].apply(lambda summary: get_en_words(summary, words))
     data_ids = gphin_data.index.values
     print(gphin_data.columns)
     if not full_data:
-        gphin_data.dropna(subset=['SOURCE', 'DATE ADDED'], inplace=True) #uncomment this and following 4 lines line if you're using WHO_all/GPHIN_all2
-        # processing the country names by removing leading and trailing spaces and newlines
-        gphin_data['SOURCE'] = gphin_data['SOURCE'].apply(lambda x: x.strip(" "))
-        gphin_data['SOURCE'] = gphin_data['SOURCE'].apply(lambda x: x.lower())
-        gphin_data['country'] = gphin_data['SOURCE'].apply(lambda x: x.strip("\n"))
+        if dataset == 'who':
+            gphin_data.dropna(subset=['SOURCE', 'DATE ADDED'], inplace=True) #uncomment this and following 4 lines line if you're using WHO_all/GPHIN_all2
+            # processing the country names by removing leading and trailing spaces and newlines
+            gphin_data['SOURCE'] = gphin_data['SOURCE'].apply(lambda x: x.strip(" "))
+            gphin_data['SOURCE'] = gphin_data['SOURCE'].apply(lambda x: x.lower())
+            gphin_data['country'] = gphin_data['SOURCE'].apply(lambda x: x.strip("\n"))
 
-        # processing the timestamps by removing leading and trailing spaces and newlines
-        gphin_data['DATE ADDED'] = gphin_data['DATE ADDED'].apply(lambda x: x.strip(" "))
-        gphin_data['DATE ADDED'] = gphin_data['DATE ADDED'].apply(lambda x: x.strip("\n"))
+            # processing the timestamps by removing leading and trailing spaces and newlines
+            gphin_data['DATE ADDED'] = gphin_data['DATE ADDED'].apply(lambda x: x.strip(" "))
+            gphin_data['DATE ADDED'] = gphin_data['DATE ADDED'].apply(lambda x: x.strip("\n"))
+
+        elif dataset == 'aylien':
+            gphin_data = gphin_data[gphin_data['country'].notna()]
+            # processing the country names by removing leading and trailing spaces and newlines
+            gphin_data.country = gphin_data['country'].apply(lambda x: x.strip(" "))
+            gphin_data.country = gphin_data['country'].apply(lambda x: x.strip("\n"))
+            # gphin_data.country = gphin_data['country'].apply(lambda x: x.lower())
+
+            # map the 2-digit country codes in aylien to the country names in who
+            gphin_data.country = gphin_data['country'].apply(lambda x: aylien_country_code_to_name[x])
+            gphin_data = gphin_data[gphin_data['country'].notna()]
 
         all_times = []
 
         #print('This is timestamps')
         #print(gphin_data.timestamps)
         #Updating gphin_data.timestamps to give weeks instead
-        for timestamp in gphin_data['DATE ADDED']:
+        for timestamp in gphin_data[dataset_to_timestamp_colnames[dataset]]:
             # below is some dangerous experiment code
             # try:
             #     d = datetime.strptime(timestamp, '%m/%d/%Y')
@@ -299,7 +369,11 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
             #         t = timestamp[0:3]+timestamp[3:]
             #         d = datetime.strptime(t.replace(':','').replace('--','-'), '%Y-%m-%d')
 
-            if not args.who_flag:
+            if dataset == 'who':
+                d = datetime.strptime(timestamp, '%d/%m/%Y')
+            elif dataset == 'aylien':
+                d = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S+00:00')
+            else:
                 # gphin
                 try:
                     if timestamp in ['29/01/2020', '30/01/2020']:
@@ -309,9 +383,6 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
                 except:
                     t = timestamp[0:3]+timestamp[3:]
                     d = datetime.strptime(t.replace(':','').replace('--','-'), '%Y-%m-%d')
-            else:
-                # who
-                d = datetime.strptime(timestamp, '%d/%m/%Y')
 
             #Get the week of the month
             week_month = get_week_of_month(d.year,d.month,d.day)
@@ -332,14 +403,17 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
             all_times.append(d)
 
 		#Update column value with weeks array : 
-        gphin_data['DATE ADDED'] = all_times
+        gphin_data[dataset_to_timestamp_colnames[dataset]] = all_times
 
-        if who_flag:
+        if dataset == 'who':
             label_columns = ['WHO_MEASURE']
             label_map = label_maps["who_harm"] if label_harm else label_maps['who']
-        elif coronanet_flag:
+        elif dataset == 'coronanet':
             label_columns = ['MEASURE']
             label_map = label_maps["coronanet"]
+        elif dataset == 'aylien':
+            # use who's label_map for cnpi
+            label_map = label_maps["who_harm"] if label_harm else label_maps['who']
         else:
             label_columns = label_maps["gphin"]
             label_map = {}
@@ -355,18 +429,19 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
         countries_to_idx = {country: idx for idx, country in enumerate(gphin_data.country.unique())}
         #print(gphin_data.columns)
         #exit()
-        if who_flag:
+        if dataset == 'who':
             label_columns.append('WHO_ID')
 
         global who_ids
 
         for country in tqdm(countries):
-            summary = gphin_data[gphin_data.country == country].SUMMARY.values
-            timestamp = gphin_data['DATE ADDED'].values #Check this in detail
+            summary = gphin_data[gphin_data.country == country][dataset_to_text_colnames[dataset]].values
+            timestamp = gphin_data[dataset_to_timestamp_colnames[dataset]].values #Check this in detail
             ind = gphin_data[gphin_data.country == country].index.values
-            doc_label = gphin_data[gphin_data.country == country][label_columns]
+            if dataset is not 'aylien':
+                doc_label = gphin_data[gphin_data.country == country][label_columns]
             
-            if who_flag:
+            if dataset == 'who':
                 # remove redundent white spaces, unnecessary for Sept 10 version
                 # gphin_data.WHO_MEASURE = gphin_data.WHO_MEASURE.apply(lambda text: " ".join(text.split()))
 
@@ -378,7 +453,7 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
                 c_labels = np.zeros([len(grps), len(label_map)])
                 for i, grp in enumerate(grps):
                     labels = grp[1].WHO_MEASURE.values
-                    summary.append(grp[1].SUMMARY.values[0])
+                    summary.append(grp[1][dataset_to_text_colnames[dataset]].values[0])
                     timestamps.append(grp[1]['DATE ADDED'].values[0])
                     index.append(grp[1].index.values[0])
                     for l in labels:
@@ -395,6 +470,23 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
                 g_data['index'].extend(list(index))
                 g_data['timestamps'].extend(list(timestamps)) #Added timestamps in the g_data dictionary with key timestamps
                 g_data['labels'].extend(list(c_labels))
+            elif dataset == 'aylien':
+                # remove redundent white spaces, unnecessary for Sept 10 version
+                # gphin_data.WHO_MEASURE = gphin_data.WHO_MEASURE.apply(lambda text: " ".join(text.split()))
+
+                sub_data = gphin_data[gphin_data.country == country]
+                summary = []
+                index = []
+                timestamps = []
+                for idx, row in sub_data.iterrows():
+                    summary.append(row[dataset_to_text_colnames[dataset]])
+                    timestamps.append(row[dataset_to_timestamp_colnames[dataset]])
+                    index.append(idx)
+                
+                g_data['data'].extend(list(summary))
+                g_data['country'].extend([country]*len(summary))
+                g_data['index'].extend(list(index))
+                g_data['timestamps'].extend(list(timestamps)) #Added timestamps in the g_data dictionary with key timestamps
 
             else:
                 # sub_data = gphin_data[gphin_data.country == country]
@@ -462,22 +554,32 @@ def read_data(data_file, who_flag=False, full_data=False, coronanet_flag=False, 
     test_ids = np.random.choice(range(len(g_data['data'])),test_num,replace=False)
     train_ids = np.array([i for i in range(len(g_data['data'])) if i not in test_ids])
 
-    train_data_x = np.array(g_data['data'])[train_ids]
-    train_data_ids = np.array(g_data['index'])[train_ids]
-    train_data_labels = np.array(g_data['labels'])[train_ids]
+    train_data_x = [g_data['data'][train_id] for train_id in train_ids]
+    train_data_ids = [g_data['index'][train_id] for train_id in train_ids]
+    train_data_labels = [g_data['labels'][train_id] for train_id in train_ids] if dataset is not 'aylien' else []
+    # train_data_x = np.array(g_data['data'])[train_ids]
+    # train_data_ids = np.array(g_data['index'])[train_ids]
+    # train_data_labels = np.array(g_data['labels'])[train_ids]
     if not full_data:
-        train_country = np.array(g_data['country'])[train_ids]
-        train_timestamps = np.array(g_data['timestamps'])[train_ids]
+        train_country = [g_data['country'][train_id] for train_id in train_ids]
+        train_timestamps = [g_data['timestamps'][train_id] for train_id in train_ids]
+        # train_country = np.array(g_data['country'])[train_ids]
+        # train_timestamps = np.array(g_data['timestamps'])[train_ids]
     else:
         train_country = []
         train_timestamps = []
 
-    test_data_x = np.array(g_data['data'])[test_ids]
-    test_data_ids = np.array(g_data['index'])[test_ids]
-    test_data_labels = np.array(g_data['labels'])[test_ids]
+    test_data_x = [g_data['data'][test_id] for test_id in test_ids]
+    test_data_ids = [g_data['index'][test_id] for test_id in test_ids]
+    test_data_labels = [g_data['labels'][test_id] for test_id in test_ids] if dataset is not 'aylien' else []
+    # test_data_x = np.array(g_data['data'])[test_ids]
+    # test_data_ids = np.array(g_data['index'])[test_ids]
+    # test_data_labels = np.array(g_data['labels'])[test_ids]
     if not full_data:
-        test_country = np.array(g_data['country'])[test_ids]
-        test_timestamps = np.array(g_data['timestamps'])[test_ids]
+        test_country = [g_data['country'][test_id] for test_id in test_ids]
+        test_timestamps = [g_data['timestamps'][test_id] for test_id in test_ids]
+        # test_country = np.array(g_data['country'])[test_ids]
+        # test_timestamps = np.array(g_data['timestamps'])[test_ids]
     else:
         test_country = []
         test_timestamps = []
@@ -689,7 +791,7 @@ def get_cnpis(countries_to_idx, time2id, labels_filename, label_map, label_harm,
 def remove_empty(in_docs, in_labels, in_ids):
     preserve_idxs = [idx for idx, doc in enumerate(in_docs) if doc!=[]]
     docs = [doc for doc in in_docs if doc!=[]]
-    labels = [label for (doc, label) in zip(in_docs, in_labels) if doc!=[]]
+    labels = [label for (doc, label) in zip(in_docs, in_labels) if doc!=[]] if in_labels else []
     ids = [id for (doc, id) in zip(in_docs, in_ids) if doc!=[]]
     return docs, labels, ids, preserve_idxs
 
@@ -710,7 +812,7 @@ def split_bow(bow_in, n_docs):
 
 
 
-def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, init_ids, full_data, init_timestamps, data_labels, source_map, q_theta_data):
+def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, init_ids, full_data, init_timestamps, data_labels, source_map, q_theta_data, dataset):
 
     # Get embeddings/embedding idxs from q_theta dictionary
     all_docs_embs = q_theta_data["init_docs_embs"]
@@ -755,7 +857,7 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
         timestamps_tr = []
         #ids_tr = []
     ids_tr = [init_ids[idx_permute[idx_d]] for idx_d in range(trSize)]
-    labels_tr = [data_labels[idx_permute[idx_d]] for idx_d in range(trSize)]
+    labels_tr = [data_labels[idx_permute[idx_d]] for idx_d in range(trSize)] if dataset is not 'aylien' else []
 
     docs_va = [[word2id[w] for w in init_docs[idx_permute[idx_d+trSize]].split() if w in word2id] for idx_d in range(vaSize)]
     docs_embs_va = [all_docs_embs[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
@@ -778,7 +880,7 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
         timestamps_va = []
         #ids_va = []
     ids_va = [init_ids[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
-    labels_va = [data_labels[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
+    labels_va = [data_labels[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)] if dataset is not 'aylien' else []
 
 
     docs_ts = [[word2id[w] for w in init_docs[idx_d+num_docs_tr].split() if w in word2id] for idx_d in range(tsSize)]
@@ -807,7 +909,7 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     print('len(data_labels)='+str(len(data_labels)))
     print("len(init_ids)="+str(len(init_ids)))
     ids_ts = [init_ids[idx_d+num_docs_tr] for idx_d in range(tsSize)]
-    labels_ts = [data_labels[idx_d+num_docs_tr] for idx_d in range(tsSize)]
+    labels_ts = [data_labels[idx_d+num_docs_tr] for idx_d in range(tsSize)] if dataset is not 'aylien' else []
 
 
     # Remove empty documents
@@ -847,7 +949,7 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     # Remove test documents with length=1
     preserve_idxs_ts = [idx for idx, doc in enumerate(docs_ts) if len(doc)>1]
     docs_ts = [doc for doc in docs_ts if len(doc)>1]
-    labels_ts = [lab for doc,lab in zip(docs_ts, labels_ts) if len(doc) > 1]
+    labels_ts = [lab for doc,lab in zip(docs_ts, labels_ts) if len(doc) > 1] if labels_ts else []
     id_ts = [id for doc, id in zip(docs_ts, ids_ts) if len(doc) > 1]
     docs_embs_ts = [docs_embs_ts[idx] for idx in preserve_idxs_ts]
     docs_embs_idxs_ts = [docs_embs_idxs_ts[idx] for idx in preserve_idxs_ts]
@@ -884,8 +986,10 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
         countries_ts_h2 = [[c for i,w in enumerate(doc) if i>len(doc)/2.0-1] for doc,c in zip(docs_ts,countries_ts)]
         timestamps_ts_h1 = [[c for i,w in enumerate(doc) if i<=len(doc)/2.0-1] for doc,c in zip(docs_ts,timestamps_ts)]
         timestamps_ts_h2 = [[c for i,w in enumerate(doc) if i>len(doc)/2.0-1] for doc,c in zip(docs_ts,timestamps_ts)]
-        labels_ts_h1 = [[c for i,w in enumerate(doc) if i<=len(doc)/2.0-1] for doc,c in zip(docs_ts,labels_ts)]
-        labels_ts_h2 = [[c for i,w in enumerate(doc) if i>len(doc)/2.0-1] for doc,c in zip(docs_ts,labels_ts)]
+        labels_ts_h1 = [[c for i,w in enumerate(doc) if i<=len(doc)/2.0-1] for doc,c in zip(docs_ts,labels_ts)] \
+            if labels_ts else []
+        labels_ts_h2 = [[c for i,w in enumerate(doc) if i>len(doc)/2.0-1] for doc,c in zip(docs_ts,labels_ts)] \
+            if labels_ts else []
     else:
         countries_ts_h1 = []
         countries_ts_h2 = []
@@ -1007,7 +1111,7 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     countries_tr, countries_ts, countries_ts_h1, countries_ts_h2, countries_va, countries_to_idx, ids_tr, ids_va, ids_ts, full_data, 
     timestamps_tr, timestamps_ts, timestamps_ts_h1, timestamps_ts_h2, timestamps_va, time_list,
     labels_tr, labels_ts, labels_ts_h1, labels_ts_h2, labels_va, label_map, id2word, id2time, 
-    q_theta_data, cnpi_data):
+    q_theta_data, cnpi_data, dataset):
 
     # Write the vocabulary to a file
     path_save = save_dir + 'min_df_' + str(min_df) + '/'
@@ -1111,7 +1215,8 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
         pickle_save(os.path.join(path_save, 'bow_tr_timestamps.pkl'), np.array(timestamps_tr))
     pkl.dump(ids_tr, open(path_save + 'bow_tr_ids.pkl',"wb"))
     #savemat(path_save+"bow_tr_labels.mat",{'labels':labels_tr},do_compression=True)
-    pickle.dump(labels_tr, open(path_save+"bow_tr_labels.pkl","wb"))
+    if dataset is not 'aylien':
+        pickle.dump(labels_tr, open(path_save+"bow_tr_labels.pkl","wb"))
 
     del bow_tr
     del bow_tr_tokens
@@ -1126,7 +1231,8 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
         pickle_save(os.path.join(path_save, 'bow_ts_timestamps.pkl'), np.array(timestamps_ts))
     pkl.dump(ids_ts, open(path_save + 'bow_ts_ids.pkl',"wb"))
     #savemat(path_save+"bow_ts_labels.mat",{'labels':labels_ts},do_compression=True)
-    pickle.dump(labels_ts, open(path_save+"bow_ts_labels.pkl","wb"))
+    if dataset is not 'aylien':
+        pickle.dump(labels_ts, open(path_save+"bow_ts_labels.pkl","wb"))
 
     del bow_ts
     del bow_ts_tokens
@@ -1141,7 +1247,8 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
         pkl.dump(countries_ts_h1, open(path_save + 'bow_ts_h1_sources.pkl',"wb"))
         pickle_save(os.path.join(path_save, 'bow_va_timestamps.pkl'), np.array(timestamps_va))
     #savemat(path_save+"bow_ts_h1_labels.mat",{'labels':labels_ts_h1},do_compression=True)
-    pickle.dump(labels_ts_h1, open(path_save+"bow_ts_h1_labels.pkl","wb"))
+    if dataset is not 'aylien':
+        pickle.dump(labels_ts_h1, open(path_save+"bow_ts_h1_labels.pkl","wb"))
 
     del bow_ts_h1
     del bow_ts_h1_tokens
@@ -1154,7 +1261,8 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     if not full_data:
         pickle.dump(countries_ts_h2, open(path_save + 'bow_ts_h2_sources.pkl',"wb"))
         pickle.dump(timestamps_ts_h2, open(path_save + 'bow_ts_h2_timestamps.pkl',"wb"))
-    pickle.dump(labels_ts_h2, open(path_save+"bow_ts_h2_labels.pkl","wb"))
+    if dataset is not 'aylien':
+        pickle.dump(labels_ts_h2, open(path_save+"bow_ts_h2_labels.pkl","wb"))
     #savemat(path_save+"bow_ts_h2_labels.mat",{'labels':labels_ts_h2},do_compression=True)
 
     del bow_ts_h2
@@ -1170,7 +1278,8 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
         pickle.dump(countries_va, open(path_save + 'bow_va_sources.pkl',"wb"))
         pickle.dump(timestamps_va, open(path_save + 'bow_va_timestamps.pkl',"wb"))
     pickle.dump(ids_va, open(path_save + 'bow_va_ids.pkl','wb'))
-    pickle.dump(labels_va, open(path_save+"bow_va_labels.pkl","wb"))
+    if dataset is not 'aylien':
+        pickle.dump(labels_va, open(path_save+"bow_va_labels.pkl","wb"))
     #savemat(path_save+"bow_va_labels.mat",{'labels':labels_va},do_compression=True)
 
     del bow_va
@@ -1192,7 +1301,14 @@ if __name__ == '__main__':
 
     # read in the data file
     print("Read in data file...\n")
-    train, test, countries_to_idx, label_map = read_data(args.data_file_path, args.who_flag, args.full_data, args.coronanet_flag, args.label_harm)
+    assert sum([args.who_flag, args.aylien_flag, args.coronanet_flag]) == 1, "only one dataset flag can be set"
+    if args.who_flag:
+        dataset = 'who'
+    elif args.aylien_flag:
+        dataset = 'aylien'
+    else:
+        dataset = 'coronanet'
+    train, test, countries_to_idx, label_map = read_data(args.data_file_path, dataset, args.full_data, args.label_harm)
 
     # preprocess the news articles
     print("Preprocessing the articles")
@@ -1217,8 +1333,8 @@ if __name__ == '__main__':
     print("Splitting data..\n")
     bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, n_docs_ts_h1, bow_ts_h2, n_docs_ts_h2, bow_va, n_docs_va, vocab, c_tr, c_ts, c_ts_h1, c_ts_h2, c_va, ids_tr, ids_va, ids_ts, timestamps_tr, timestamps_ts, timestamps_ts_h1, timestamps_ts_h2, timestamps_va, labels_tr, labels_ts, labels_ts_h1, labels_ts_h2, labels_va, \
         q_theta_data \
-        = split_data(all_docs, train_docs, test_docs, word2id, init_countries, init_ids, args.full_data, init_timestamps, data_labels, countries_to_idx, q_theta_data)
+        = split_data(all_docs, train_docs, test_docs, word2id, init_countries, init_ids, args.full_data, init_timestamps, data_labels, countries_to_idx, q_theta_data, dataset)
 
     print("Saving data..\n")
     save_data(args.save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, n_docs_ts_h1, bow_ts_h2, n_docs_ts_h2, bow_va, n_docs_va, c_tr, c_ts, c_ts_h1, c_ts_h2, c_va, countries_to_idx, ids_tr, ids_va, ids_ts, args.full_data, timestamps_tr, timestamps_ts, timestamps_ts_h1, timestamps_ts_h2, timestamps_va, time_list, labels_tr, labels_ts, labels_ts_h1, labels_ts_h2, labels_va, label_map, id2word, id2time, \
-        q_theta_data, cnpi_data)
+        q_theta_data, cnpi_data, dataset)
