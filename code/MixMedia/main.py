@@ -171,12 +171,13 @@ if args.mode == 'train':
     if args.logger == 'tb':
         writer = SummaryWriter(f"runs/{time_stamp}")
     else:
-        tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset, "Use alpha embeddings"]
-        # tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset]
+        tags = [f"MixMedia {args.q_theta_arc.upper()}", f"{args.num_topics} topics", args.dataset]
         if args.predict_cnpi:
             tags.append('Country NPI')
         if args.predict_labels:
             tags.append('Document NPI')
+        if args.use_eta_lstm:
+            tags.append('RNN on eta')
         wandb.init(name=f"{time_stamp}", notes="MixMedia LSTM", project="covid", config=args, tags=tags)
 
 # pca seems unused
