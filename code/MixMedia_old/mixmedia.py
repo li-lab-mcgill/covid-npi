@@ -389,7 +389,7 @@ class MixMedia(nn.Module):
         predictions = self.cnpi_out(predictions)
         return self.cnpi_criterion(predictions * cnpi_mask, cnpis * cnpi_mask)
 
-    def forward(self, bows, normalized_bows, embs, times, sources, labels, cnpi_data, rnn_inp, num_docs):        
+    def forward(self, bows, normalized_bows, times, sources, labels, cnpi_data, rnn_inp, num_docs):        
 
         bsz = normalized_bows.size(0)
         coeff = num_docs / bsz

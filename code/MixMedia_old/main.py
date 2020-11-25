@@ -14,10 +14,11 @@ import random
 import scipy.io
 import json
 import time
+from itertools import compress
 
-import data 
+from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_curve
 
-from sklearn.metrics import average_precision_score, roc_auc_score
+import data
 
 # from sklearn.decomposition import PCA
 from torch import nn, optim
@@ -143,7 +144,7 @@ parser.add_argument('--predict_cnpi', type=int, default=1, help='whether to pred
 parser.add_argument('--time_prior', type=int, default=1, help='whether to use time-dependent topic prior')
 parser.add_argument('--source_prior', type=int, default=1, help='whether to use source-specific topic prior')
 
-parser.add_argument('--logger', help="choose logger. 'tb' for tensorboard (default), 'wb' for wandb. default None.", \
+parser.add_argument('--logger', help="choose logger. 'tb' for tensorboard (default), 'wb' for wandb.", \
     choices=['tb', 'wb'], default='tb')
 
 args = parser.parse_args()
@@ -195,13 +196,12 @@ args.vocab_size = vocab_size
 print('Getting training data ...')
 train_tokens = train['tokens']
 train_counts = train['counts']
-train_embs = train['embs']
 train_times = train['times']
 train_sources = train['sources']
 train_labels = train['labels']
 
 # sort training samples in order of length
-train_lengths = [len(train_emb) for train_emb in train_embs]
+train_lengths = [len(train_token) for train_token in train_tokens]
 train_indices_order = np.argsort(train_lengths)
 
 # args.q_theta_input_dim = train_embs[0].shape[1]
@@ -250,13 +250,12 @@ train_rnn_inp = data.get_rnn_input(
 print('Getting validation data ...')
 valid_tokens = valid['tokens']
 valid_counts = valid['counts']
-valid_embs = valid['embs']
 valid_times = valid['times']
 valid_sources = valid['sources']
 valid_labels = train['labels']
 
 # sort valid samples in order of length
-valid_lengths = [len(valid_emb) for valid_emb in valid_embs]
+valid_lengths = [len(valid_token) for valid_token in valid_tokens]
 valid_indices_order = np.argsort(valid_lengths)
 
 
@@ -270,13 +269,12 @@ valid_rnn_inp = data.get_rnn_input(
 print('Getting testing data ...')
 test_tokens = test['tokens']
 test_counts = test['counts']
-test_embs = test['embs']
 test_times = test['times']
 test_sources = test['sources']
 test_labels = test['labels']
 
 # sort test samples in order of length
-test_lengths = [len(test_emb) for test_emb in test_embs]
+test_lengths = [len(test_token) for test_token in test_tokens]
 test_indices_order = np.argsort(test_lengths)
 
 
@@ -289,7 +287,6 @@ test_rnn_inp = data.get_rnn_input(
 
 test_1_tokens = test['tokens_1']
 test_1_counts = test['counts_1']
-test_1_embs = test['embs_1']
 test_1_times = test_times
 args.num_docs_test_1 = len(test_1_tokens)
 test_1_rnn_inp = data.get_rnn_input(
@@ -300,7 +297,6 @@ test_1_rnn_inp = data.get_rnn_input(
 
 test_2_tokens = test['tokens_2']
 test_2_counts = test['counts_2']
-test_2_embs = test['embs_2']
 test_2_times = test_times
 args.num_docs_test_2 = len(test_2_tokens)
 test_2_rnn_inp = data.get_rnn_input(
@@ -437,8 +433,8 @@ def train(epoch):
         optimizer.zero_grad()
         model.zero_grad()        
         
-        data_batch, embs_batch, times_batch, sources_batch, labels_batch = data.get_batch(
-            train_tokens, train_counts, train_embs, ind, train_sources, train_labels, 
+        data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
+            train_tokens, train_counts, ind, train_sources, train_labels, 
             args.vocab_size, args.emb_size, temporal=True, times=train_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)        
 
         sums = data_batch.sum(1).unsqueeze(1)
@@ -450,7 +446,7 @@ def train(epoch):
 
         # print("forward passing ...")
 
-        loss, nll, kl_alpha, kl_eta, kl_theta, pred_loss, cnpi_pred_loss = model(data_batch, normalized_data_batch, embs_batch,
+        loss, nll, kl_alpha, kl_eta, kl_theta, pred_loss, cnpi_pred_loss = model(data_batch, normalized_data_batch,
             times_batch, sources_batch, labels_batch, cnpi_data, train_rnn_inp, args.num_docs_train)
 
         # set_trace()
@@ -629,7 +625,6 @@ def get_completion_ppl(source):
             # indices = torch.split(torch.tensor(range(args.num_docs_valid)), args.eval_batch_size)            
             tokens = valid_tokens
             counts = valid_counts
-            embs = valid_embs
             times = valid_times
             sources = valid_sources
             labels = valid_labels
@@ -642,8 +637,8 @@ def get_completion_ppl(source):
             cnt = 0
             for idx, ind in enumerate(indices):
                 
-                data_batch, embs_batch, times_batch, sources_batch, labels_batch = data.get_batch(
-                    tokens, counts, embs, ind, sources, labels, 
+                data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
+                    tokens, counts, ind, sources, labels, 
                     args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
 
                 sums = data_batch.sum(1).unsqueeze(1)
@@ -688,10 +683,8 @@ def get_completion_ppl(source):
             indices = torch.split(indices, args.eval_batch_size)
             tokens_1 = test_1_tokens
             counts_1 = test_1_counts
-            embs_1 = test_1_embs
             tokens_2 = test_2_tokens
             counts_2 = test_2_counts            
-            embs_2 = test_2_embs
 
             eta_1 = get_eta('test')
 
@@ -702,8 +695,8 @@ def get_completion_ppl(source):
             # indices = torch.split(torch.tensor(range(args.num_docs_test)), args.eval_batch_size)
             for idx, ind in enumerate(indices):
 
-                data_batch_1, embs_batch_1, times_batch_1, sources_batch_1, labels_batch_1 = data.get_batch(
-                    tokens_1, counts_1, embs_1, ind, test_sources, test_labels,
+                data_batch_1, times_batch_1, sources_batch_1, labels_batch_1 = data.get_batch(
+                    tokens_1, counts_1, ind, test_sources, test_labels,
                     args.vocab_size, args.emb_size, temporal=True, times=test_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
                 
                 sums_1 = data_batch_1.sum(1).unsqueeze(1)
@@ -715,8 +708,8 @@ def get_completion_ppl(source):
                 
                 theta = get_theta(eta_1, normalized_data_batch_1, times_batch_1, sources_batch_1)
 
-                data_batch_2, embs_batch_2, times_batch_2, sources_batch_2, labels_batch_2 = data.get_batch(
-                    tokens_2, counts_2, embs_2, ind, test_sources, test_labels,
+                data_batch_2, times_batch_2, sources_batch_2, labels_batch_2 = data.get_batch(
+                    tokens_2, counts_2, ind, test_sources, test_labels,
                     args.vocab_size, args.emb_size, temporal=True, times=test_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
 
                 sums_2 = data_batch_2.sum(1).unsqueeze(1)
@@ -882,6 +875,18 @@ def compute_top_k_recall(labels, predictions, k=5, breakdown_by=None):
 #             predictions_masked.reshape(-1, predictions_masked.shape[-1]), 10)],
 #         }
 
+def get_cnpi_predictions(mode):
+    eta = get_eta(mode)
+    label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+    cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+    if args.use_cnpi_lstm:
+        # cnpi_input = torch.softmax(cnpi_input, dim=-1)
+        # cnpi_input = torch.matmul(cnpi_input, model.mu_q_alpha)
+        predictions = model.cnpi_lstm(cnpi_input)[0]
+    else:
+        predictions = cnpi_input
+    return model.cnpi_out(predictions)
+
 def get_cnpi_top_k_metrics(cnpis, cnpi_mask, mode, return_vals=['recall', 'precision', 'f1'], breakdown_by=None):
     assert mode in ['val', 'test'], 'mode must be val or test'
     assert all([return_val in ['recall', 'precision', 'f1'] for return_val in return_vals]), \
@@ -889,14 +894,15 @@ def get_cnpi_top_k_metrics(cnpis, cnpi_mask, mode, return_vals=['recall', 'preci
     assert return_vals, 'no return value is specified'
 
     with torch.no_grad():
-        eta = get_eta(mode)
-        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
-        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
-        if args.use_cnpi_lstm:
-            predictions = model.cnpi_lstm(cnpi_input)[0]
-        else:
-            predictions = cnpi_input
-        predictions = model.cnpi_out(predictions)
+        # eta = get_eta(mode)
+        # label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        # cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        # if args.use_cnpi_lstm:
+        #     predictions = model.cnpi_lstm(cnpi_input)[0]
+        # else:
+        #     predictions = cnpi_input
+        # predictions = model.cnpi_out(predictions)
+        predictions = get_cnpi_predictions(mode)
         cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
         cnpis_masked = cnpis * cnpi_mask
         predictions_masked = predictions * cnpi_mask    # taking indices only so not computing sigmoid
@@ -959,7 +965,6 @@ def get_doc_labels_metrics(mode, return_vals=['recall', 'precision', 'f1']):
         indices = torch.split(indices, args.eval_batch_size)
         tokens = valid_tokens if mode == 'val' else test_tokens
         counts = valid_counts if mode == 'val' else test_counts
-        embs = valid_embs if mode == 'val' else test_embs
         times = valid_times if mode == 'val' else test_times
         sources = valid_sources if mode == 'val' else test_sources
         labels = valid_labels if mode == 'val' else test_labels
@@ -968,8 +973,8 @@ def get_doc_labels_metrics(mode, return_vals=['recall', 'precision', 'f1']):
         all_labels = []
 
         for idx, ind in enumerate(indices):
-            data_batch, embs_batch, times_batch, sources_batch, labels_batch = data.get_batch(
-                tokens, counts, embs, ind, sources, labels, 
+            data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
+                tokens, counts, ind, sources, labels, 
                 args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
 
             sums = data_batch.sum(1).unsqueeze(1)
@@ -1044,14 +1049,15 @@ def get_cnpi_auprcs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
     assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
 
     with torch.no_grad():
-        eta = get_eta(mode)
-        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
-        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
-        if args.use_cnpi_lstm:
-            predictions = model.cnpi_lstm(cnpi_input)[0]
-        else:
-            predictions = cnpi_input
-        predictions = model.cnpi_out(predictions)
+        # eta = get_eta(mode)
+        # label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        # cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        # if args.use_cnpi_lstm:
+        #     predictions = model.cnpi_lstm(cnpi_input)[0]
+        # else:
+        #     predictions = cnpi_input
+        # predictions = model.cnpi_out(predictions)
+        predictions = get_cnpi_predictions(mode)
         cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
         cnpis_masked = cnpis * cnpi_mask
         predictions_masked = torch.sigmoid(predictions * cnpi_mask)
@@ -1088,14 +1094,15 @@ def get_cnpi_aurocs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
     assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
 
     with torch.no_grad():
-        eta = get_eta(mode)
-        label_key = 'valid_labels' if mode == 'val' else 'test_labels'
-        cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
-        if args.use_cnpi_lstm:
-            predictions = model.cnpi_lstm(cnpi_input)[0]
-        else:
-            predictions = cnpi_input
-        predictions = model.cnpi_out(predictions)
+        # eta = get_eta(mode)
+        # label_key = 'valid_labels' if mode == 'val' else 'test_labels'
+        # cnpi_input = torch.cat([eta, cnpi_data[label_key]], dim=-1) if args.use_doc_labels else eta
+        # if args.use_cnpi_lstm:
+        #     predictions = model.cnpi_lstm(cnpi_input)[0]
+        # else:
+        #     predictions = cnpi_input
+        # predictions = model.cnpi_out(predictions)
+        predictions = get_cnpi_predictions(mode)
         cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
         cnpis_masked = cnpis * cnpi_mask
         predictions_masked = torch.sigmoid(predictions * cnpi_mask)
@@ -1106,6 +1113,52 @@ def get_cnpi_aurocs(cnpis, cnpi_mask, mode, breakdown_by='measure'):
     else:
         return np.array([compute_auroc_breakdown(cnpis_masked[source_idx, :, :], \
             predictions_masked[source_idx, :, :], average='micro') for source_idx in range(cnpis_masked.shape[0])])
+
+def compute_prc_curves(labels, predictions, average=None):
+    '''
+    inputs:
+    - labels: tensor, (number of samples, number of classes)
+    - predictions: tensor, (number of samples, number of classes)
+    - average: None or str, whether to take the average
+    output:
+    - precisions: dictionary, {label index: precision scores}
+    - recalls: dictionary, {label index: recall scores}
+    '''
+    # remove ones without positive labels
+    has_pos_labels = labels.sum(1) != 0
+    labels = labels[has_pos_labels, :]
+    predictions = predictions[has_pos_labels, :]
+    
+    labels = labels.cpu().numpy()
+    if labels.size == 0:    # empty
+        return np.nan
+    predictions = predictions.cpu().numpy()
+
+    precisions = []
+    recalls = []
+    for idx in range(labels.shape[-1]):
+        precision, recall, _ = precision_recall_curve(labels[:, idx], predictions[:, idx])
+        precisions.append(precision)
+        recalls.append(recall)
+
+    return precisions, recalls
+
+def get_precision_recall_curve(cnpis, cnpi_mask, mode, breakdown_by='measure'):
+    assert mode in ['val', 'test'], 'mode must be val or test'
+    assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
+
+    with torch.no_grad():
+        predictions = get_cnpi_predictions(mode)
+        cnpi_mask = 1 - cnpi_mask   # invert the mask to use unseen data points for evaluation
+        cnpis_masked = cnpis * cnpi_mask
+        predictions_masked = torch.sigmoid(predictions * cnpi_mask)
+
+    if breakdown_by == 'measure':
+        return compute_prc_curves(cnpis_masked.reshape(-1, cnpis_masked.shape[-1]), \
+            predictions_masked.reshape(-1, predictions_masked.shape[-1]))
+    else:
+        return {source_idx: compute_prc_curves(cnpis_masked[source_idx, :, :], \
+            predictions_masked[source_idx, :, :], average='micro') for source_idx in range(cnpis_masked.shape[0])}
 
 if args.mode == 'train':
     ## train model on data by looping through multiple epochs
@@ -1132,7 +1185,7 @@ if args.mode == 'train':
             writer.add_scalar('PPL/val', val_ppl, epoch)
         else:
             wandb.log({'PPL/val': val_ppl, 'epoch': epoch})
-        if (epoch - 1) % 5 == 0:
+        if (epoch - 1) % 20 == 0:
             tq, tc, td = get_topic_quality()
             if args.logger == 'tb':
                 writer.add_scalar('Topic/quality', tq, epoch)
@@ -1442,6 +1495,12 @@ if args.predict_cnpi:
             for source_idx, auroc in enumerate(test_cnpi_aurocs_breakdown_source) if not np.isnan(auroc)}
     with open(os.path.join(ckpt, 'test_cnpi_aurocs_source.json'), 'w') as file:
         json.dump(test_cnpi_aurocs_breakdown_source_out, file)
+
+    # precision-recall curves breakdown by measure
+    test_cnpi_precisions_breakdown, test_cnpi_recalls_breakdown = \
+        get_precision_recall_curve(cnpis, cnpi_mask, 'test')
+    np.save(os.path.join(ckpt, 'test_cnpi_precisions.npy'), test_cnpi_precisions_breakdown)
+    np.save(os.path.join(ckpt, 'test_cnpi_recalls.npy'), test_cnpi_recalls_breakdown)
 
 f=open(os.path.join(ckpt, 'test_ppl.txt'),'w')
 f.write(str(test_ppl))

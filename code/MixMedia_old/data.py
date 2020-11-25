@@ -96,7 +96,7 @@ def _fetch_temporal(path, name, predict=True, use_time=True, use_source=True, if
     
     tokens = pickle_load(token_file)
     counts = pickle_load(count_file)
-    embs, emb_vocab_size = get_embs(path, name, if_one_hot, emb_vocab_size, q_theta_arc)
+    # embs, emb_vocab_size = get_embs(path, name, if_one_hot, emb_vocab_size, q_theta_arc)
     
     if use_time:        
         times = pickle_load(time_file)
@@ -122,16 +122,19 @@ def _fetch_temporal(path, name, predict=True, use_time=True, use_source=True, if
         count_2_file = os.path.join(path, 'bow_ts_h2_counts.pkl')        
         tokens_1 = pickle_load(token_1_file)
         counts_1 = pickle_load(count_1_file)
-        embs_1, emb_vocab_size = get_embs(path, 'test_h1', if_one_hot, emb_vocab_size, q_theta_arc)
+        # embs_1, emb_vocab_size = get_embs(path, 'test_h1', if_one_hot, emb_vocab_size, q_theta_arc)
         tokens_2 = pickle_load(token_2_file)
         counts_2 = pickle_load(count_2_file)
-        embs_2, emb_vocab_size = get_embs(path, 'test_h2', if_one_hot, emb_vocab_size, q_theta_arc)
+        # embs_2, emb_vocab_size = get_embs(path, 'test_h2', if_one_hot, emb_vocab_size, q_theta_arc)
 
-        return {'tokens': tokens, 'counts': counts, 'embs': embs, 'times': times, 'sources': sources, 'labels': labels,
-                    'tokens_1': tokens_1, 'counts_1': counts_1, 'embs_1': embs_1,
-                        'tokens_2': tokens_2, 'counts_2': counts_2, 'embs_2': embs_2}, emb_vocab_size 
+        # return {'tokens': tokens, 'counts': counts, 'embs': embs, 'times': times, 'sources': sources, 'labels': labels,
+        #             'tokens_1': tokens_1, 'counts_1': counts_1, 'embs_1': embs_1,
+        #                 'tokens_2': tokens_2, 'counts_2': counts_2, 'embs_2': embs_2}, emb_vocab_size 
+        return {'tokens': tokens, 'counts': counts, 'times': times, 'sources': sources, 'labels': labels,
+                    'tokens_1': tokens_1, 'counts_1': counts_1,
+                        'tokens_2': tokens_2, 'counts_2': counts_2}, emb_vocab_size 
 
-    return {'tokens': tokens, 'counts': counts, 'embs': embs, 'times': times, 'sources': sources, 'labels': labels}, emb_vocab_size
+    return {'tokens': tokens, 'counts': counts, 'times': times, 'sources': sources, 'labels': labels}, emb_vocab_size
 
 def get_data(path, temporal=False, predict=False, use_time=False, use_source=False, if_one_hot=True, q_theta_arc='lstm'):
     ### load vocabulary
@@ -149,12 +152,11 @@ def get_data(path, temporal=False, predict=False, use_time=False, use_source=Fal
 
     return vocab, train, valid, test, emb_vocab_size
 
-def get_batch(tokens, counts, embs, ind, sources, labels, vocab_size, emsize=300, temporal=False, times=None, get_emb=True, if_one_hot=True, emb_vocab_size=None):
+def get_batch(tokens, counts, ind, sources, labels, vocab_size, emsize=300, temporal=False, times=None, get_emb=True, if_one_hot=True, emb_vocab_size=None):
     
     """fetch input data by batch."""
     batch_size = len(ind)
     data_batch = np.zeros((batch_size, vocab_size))
-    embs_batch = []
     
     if temporal:
         times_batch = np.zeros((batch_size, ))
@@ -192,29 +194,16 @@ def get_batch(tokens, counts, embs, ind, sources, labels, vocab_size, emsize=300
         if doc_id != -1:
             for j, word in enumerate(doc):
                 data_batch[i, word] = count[j]
-
-        if get_emb:
-            # get embeddings batch, max length of 512
-            if if_one_hot:
-                # embs_batch.append(torch.tensor(idxs_to_one_hot(embs[doc_id], emb_vocab_size), dtype=torch.float32))
-                embs_batch.append(torch.tensor(embs[doc_id][: 512], dtype=torch.long))
-            else:
-                embs_batch.append(torch.tensor(embs[doc_id][: 512], dtype=torch.float32))
     
     data_batch = torch.from_numpy(data_batch).float().to(device)
-    if get_emb:
-        # embs_batch = torch.tensor(embs_batch).to(device)
-        embs_batch_padded = torch.nn.utils.rnn.pad_sequence(embs_batch, batch_first=True).to(device)
-    else:
-        embs_batch_padded = []
     sources_batch = torch.from_numpy(sources_batch).to(device)
     labels_batch = torch.from_numpy(labels_batch).to(device)
 
     if temporal:
         times_batch = torch.from_numpy(times_batch).to(device)
-        return data_batch, embs_batch_padded, times_batch, sources_batch, labels_batch
+        return data_batch, times_batch, sources_batch, labels_batch
 
-    return data_batch, embs_batch_padded, sources_batch, labels_batch
+    return data_batch, sources_batch, labels_batch
 
 
 ## get source-specific word frequencies at each time point t
@@ -229,7 +218,7 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
 
     for idx, ind in enumerate(indices):
         
-        data_batch, _, times_batch, sources_batch, labels_batch = get_batch(tokens, counts, None, ind, sources, labels, vocab_size, temporal=True, times=times, get_emb=False)
+        data_batch, times_batch, sources_batch, labels_batch = get_batch(tokens, counts, ind, sources, labels, vocab_size, temporal=True, times=times, get_emb=False)
 
         for t in range(num_times):
             for src in range(num_sources):
