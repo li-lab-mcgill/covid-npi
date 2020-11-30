@@ -71,6 +71,7 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
         # load eta
         eta = torch.from_numpy(np.load(os.path.join(self.configs['eta_path'], 'eta.npy')))
         eta = torch.softmax(eta, dim=-1)
+        self.num_sources = eta.shape[0]
 
         # load cnpis
         cnpis_file = os.path.join(self.path, 'cnpis.pkl')
@@ -87,10 +88,16 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
 
         # construct training and validation datasets
         self.train_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
-        self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, 1 - cnpi_mask)
+        self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
+        self.test_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True)
 
     def val_dataloader(self):
-        return DataLoader(self.eval_dataset, batch_size=self.configs['batch_size'], shuffle=True)
+        # evaluate all countries at once
+        return DataLoader(self.eval_dataset, batch_size=self.num_sources, shuffle=True)
+
+    def test_dataloader(self):
+        # evaluate all countries at once
+        return DataLoader(self.test_dataset, batch_size=self.num_sources, shuffle=True)

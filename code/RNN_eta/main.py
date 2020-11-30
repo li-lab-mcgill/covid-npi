@@ -6,11 +6,15 @@ import torch
 import torch.nn.functional as F
 from torch import nn, optim
 # from torch.utils.data import DataLoader
+from sklearn.metrics import average_precision_score
 
 import pytorch_lightning as pl
 from pytorch_lightning import loggers as pl_loggers
 
 from data import COVID_Eta_Data_Module
+
+import wandb
+import pandas as pd
 
 def parse_args():
     parser = argparse.ArgumentParser(description='RNN CNPI prediction baseline')
@@ -82,7 +86,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             'scheduler': scheduler,
             'reduce_on_plateau': True,
             # val_checkpoint_on is val_loss passed in as checkpoint_on
-            'monitor': 'val_checkpoint_on'
+            # 'monitor': 'val_checkpoint_on'
+            'monitor': 'val_loss'
         }
         return [optimizer], [scheduler]
 
@@ -122,8 +127,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
 
         val_loss = F.binary_cross_entropy_with_logits(batch_predictions_masked, batch_labels_masked)
 
-        results = pl.EvalResult(checkpoint_on=val_loss)
-        results.log('val_loss', val_loss)
+        self.log_dict({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
+        self.logger.experiment.log({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
 
         top_k_recalls = {
             1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
@@ -135,7 +140,10 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
                 batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10),
             }
-        results.log_dict({f"recall/{key}": value for key, value in top_k_recalls.items()})
+        top_k_recalls_log = {f"recall/{key}": value for key, value in top_k_recalls.items()}
+        top_k_recalls_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+        # self.log_dict(top_k_recalls_log)
+        self.logger.experiment.log(top_k_recalls_log)
         top_k_precs = {
             1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
                 batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 1, 'prec'),
@@ -146,13 +154,62 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
                 batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10, 'prec'),
             }
-        results.log_dict({f"prec/{key}": value for key, value in top_k_precs.items()})
+        top_k_precs_log = {f"prec/{key}": value for key, value in top_k_precs.items()}
+        top_k_precs_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+        # self.log_dict(top_k_precs_log)
+        self.logger.experiment.log(top_k_precs_log)
         top_k_f1s = {
             k: (2 * top_k_recalls[k] * top_k_precs[k]) / \
                 (top_k_recalls[k] + top_k_precs[k]) for k in [1, 3, 5, 10]
             }
-        results.log_dict({f"f1/{key}": value for key, value in top_k_f1s.items()})
-        return results
+        top_k_f1s_log = {f"f1/{key}": value for key, value in top_k_f1s.items()}
+        top_k_f1s_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+        # self.log_dict(top_k_f1s_log)
+        self.logger.experiment.log(top_k_f1s_log)
+        # return results
+
+    def compute_auprc_breakdown(self, labels, predictions, average=None):
+        '''
+        inputs:
+        - labels: tensor, (number of samples, number of classes)
+        - predictions: tensor, (number of samples, number of classes)
+        - average: None or str, whether to take the average
+        output:
+        - auprcs: array, (number of classes) if average is None, or scalar otherwise
+        '''
+        # remove ones without positive labels
+        has_pos_labels = labels.sum(1) != 0
+        labels = labels[has_pos_labels, :]
+        predictions = predictions[has_pos_labels, :]
+        
+        labels = labels.cpu().numpy()
+        if labels.size == 0:    # empty
+            return np.nan
+        predictions = predictions.cpu().numpy()
+        return average_precision_score(labels, predictions, average=average)
+
+    def get_cnpi_auprcs(self, batch_bows, batch_labels, batch_mask):
+        batch_predictions = self(batch_bows)
+        batch_mask = 1 - batch_mask
+        batch_predictions_masked = batch_predictions * batch_mask
+        batch_labels_masked = batch_labels * batch_mask
+
+        return self.compute_auprc_breakdown(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+            batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]))
+
+    def test_step(self, batch, batch_idx):
+        batch_bows, batch_labels, batch_mask = batch
+        cnpi_auprcs_breakdown = self.get_cnpi_auprcs(batch_bows, batch_labels, batch_mask)
+        cnpi_auprcs_breakdown_out = {label_idx_to_label[label_idx]: cnpi_auprcs_breakdown[label_idx] \
+                for label_idx, auprc in enumerate(cnpi_auprcs_breakdown) if not np.isnan(auprc)}
+        
+        auprc_df = pd.DataFrame.from_dict(cnpi_auprcs_breakdown_out, \
+            orient='index')
+        auprc_df.columns = ['auprc']
+        auprc_df["measure"] = auprc_df.index
+        wandb_table = wandb.Table(dataframe=auprc_df)
+        self.logger.experiment.log({"AUPRC breakdown": wandb_table})
+        return cnpi_auprcs_breakdown_out
 
 if __name__ == '__main__':
     args = parse_args()
@@ -186,6 +243,11 @@ if __name__ == '__main__':
     configs['num_cnpis'] = cnpis.shape[-1]
     del cnpis
 
+    # load label_maps for auprc breakdown
+    with open(os.path.join(configs['data_path'], 'min_df_{}'.format(configs['min_df']), 'labels_map.pkl'), 'rb') as file:
+        labels_map = pickle.load(file)  
+    label_idx_to_label = {value: key for key, value in labels_map.items()}
+
     ## set seed
     np.random.seed(args.seed)
     torch.backends.cudnn.deterministic = True
@@ -218,3 +280,10 @@ if __name__ == '__main__':
         weights_save_path=os.path.join(configs['save_path'], time_stamp)
         )
     trainer.fit(model, data_module)
+    trainer.test()
+    # save predictions
+    with torch.no_grad():
+        for data, _, _ in data_module.test_dataloader():
+            test_predictions = model(data.to(torch.device('cuda')))
+        # should be only 1 batch
+        torch.save(test_predictions, os.path.join(configs['save_path'], time_stamp, 'test_predictions.pt'))
