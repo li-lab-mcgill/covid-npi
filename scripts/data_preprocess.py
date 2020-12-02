@@ -198,6 +198,7 @@ aylien_country_code_to_name = {
     'TW': None,
     'CH': 'switzerland',
     'TN': 'tunisia',
+    'CU': 'cuba',
 }
 
 dataset_to_text_colnames = {
@@ -308,7 +309,7 @@ def read_data(data_file, dataset, full_data=False, label_harm=False):
     # Read data
     print('reading data...')
     print(data_file)
-    gphin_data = pd.read_csv(data_file)
+    gphin_data = pd.read_csv(data_file, engine='c')
     #gphin_data = gphin_data.rename(columns={"COUNTRY /ORGANIZATION":"country"})
 
     timestamps = [] #Add timestamps array, not sure if we need this right now
