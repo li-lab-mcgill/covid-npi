@@ -26,6 +26,7 @@ def parse_args():
     parser.add_argument('--save_path', type=str, help='path to save results')
 
     # training configs
+    parser.add_argument('--test', action='store_true', help='test only')
     parser.add_argument('--batch_size', type=int, default=128, help='number of documents in a batch for training')
     parser.add_argument('--min_df', type=int, default=10, help='to get the right data..minimum document frequency')
     parser.add_argument('--lr', type=float, default=1e-3, help='learning rate')
@@ -44,6 +45,7 @@ def parse_args():
         help='embed topics with learnable embeddings')
     parser.add_argument('--embed_topic_with_alpha', action='store_true', \
         help='embed topics with embeddings from mixmedia')
+    parser.add_argument('--checkpoint', type=str, help='checkpoint to evaluate. only effective in test mode')
 
     return parser.parse_args()
 
@@ -188,17 +190,25 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         predictions = predictions.cpu().numpy()
         return average_precision_score(labels, predictions, average=average)
 
-    def get_cnpi_auprcs(self, batch_bows, batch_labels, batch_mask):
+    def get_cnpi_auprcs(self, batch_bows, batch_labels, batch_mask, breakdown_by='measure'):
+        assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
+
         batch_predictions = self(batch_bows)
         batch_mask = 1 - batch_mask
         batch_predictions_masked = batch_predictions * batch_mask
         batch_labels_masked = batch_labels * batch_mask
 
-        return self.compute_auprc_breakdown(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-            batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]))
+        if breakdown_by == 'measure':
+            return self.compute_auprc_breakdown(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]))
+        else:
+            return np.array([self.compute_auprc_breakdown(batch_labels_masked[source_idx, :, :], \
+                batch_predictions_masked[source_idx, :, :], average='micro') \
+                    for source_idx in range(batch_labels_masked.shape[0])])
 
     def test_step(self, batch, batch_idx):
         batch_bows, batch_labels, batch_mask = batch
+        # breakdown by measure
         cnpi_auprcs_breakdown = self.get_cnpi_auprcs(batch_bows, batch_labels, batch_mask)
         cnpi_auprcs_breakdown_out = {label_idx_to_label[label_idx]: cnpi_auprcs_breakdown[label_idx] \
                 for label_idx, auprc in enumerate(cnpi_auprcs_breakdown) if not np.isnan(auprc)}
@@ -209,11 +219,29 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         auprc_df["measure"] = auprc_df.index
         wandb_table = wandb.Table(dataframe=auprc_df)
         self.logger.experiment.log({"AUPRC breakdown": wandb_table})
-        return cnpi_auprcs_breakdown_out
+
+        # breakdown by source
+        cnpi_auprcs_breakdown_source = self.get_cnpi_auprcs(batch_bows, batch_labels, batch_mask, breakdown_by='source')
+        cnpi_auprcs_breakdown_source_out = {source_idx_to_source[source_idx]: auprc \
+                for source_idx, auprc in enumerate(cnpi_auprcs_breakdown_source) if not np.isnan(auprc)}
+        
+        auprc_source_df = pd.DataFrame.from_dict(cnpi_auprcs_breakdown_source_out, \
+            orient='index')
+        auprc_source_df.columns = ['auprc']
+        auprc_source_df["source"] = auprc_source_df.index
+        wandb_table = wandb.Table(dataframe=auprc_source_df)
+        self.logger.experiment.log({"AUPRC breakdown by source": wandb_table})
+
+        return cnpi_auprcs_breakdown_out, cnpi_auprcs_breakdown_source_out
 
 if __name__ == '__main__':
     args = parse_args()
     configs = vars(args)
+
+    if args.test:
+        if not args.checkpoint:
+            raise Exception("no checkpoint provided")
+        print(f"Testing with checkpoint {args.checkpoint}")
 
     assert not (configs['embed_topic'] and configs['embed_topic_with_alpha']), \
         "can not learn embedding if using alpha"
@@ -248,6 +276,11 @@ if __name__ == '__main__':
         labels_map = pickle.load(file)  
     label_idx_to_label = {value: key for key, value in labels_map.items()}
 
+    # load sources_maps for auprc breakdown
+    with open(os.path.join(configs['data_path'], 'min_df_{}'.format(configs['min_df']), 'sources_map.pkl'), 'rb') as file:
+        sources_map = pickle.load(file) 
+    source_idx_to_source = {value: key for key, value in sources_map.items()}
+
     ## set seed
     np.random.seed(args.seed)
     torch.backends.cudnn.deterministic = True
@@ -258,6 +291,12 @@ if __name__ == '__main__':
 
     # initiate model
     model = RNN_CNPI_EtaModel(configs)
+    if args.test:
+        checkpoint = torch.load(args.checkpoint)
+        # model = RNN_CNPI_BaseModel.load_from_checkpoint(
+        #     checkpoint_path=args.checkpoint,
+        # )
+        model.load_state_dict(checkpoint['state_dict'])
 
     # train
     # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
@@ -266,6 +305,8 @@ if __name__ == '__main__':
         tags.append('Train topic embeddings')
     if configs['embed_topic_with_alpha']:
         tags.append('Use alpha embeddings')
+    if args.test:
+        tags.append("Test")
     wb_logger = pl_loggers.WandbLogger(
         name=f"{time_stamp}",
         project="covid",
@@ -279,8 +320,11 @@ if __name__ == '__main__':
         logger=wb_logger,
         weights_save_path=os.path.join(configs['save_path'], time_stamp)
         )
-    trainer.fit(model, data_module)
-    trainer.test()
+    if not args.test:
+        trainer.fit(model, data_module)
+        trainer.test()
+    else:
+        trainer.test(model, datamodule=data_module)
     # save predictions
     with torch.no_grad():
         for data, _, _ in data_module.test_dataloader():
