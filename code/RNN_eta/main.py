@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=400, help='number of epochs to train')
     parser.add_argument('--mode', type=str, default='train', help='train or eval model')
     parser.add_argument('--wdecay', type=float, default=1.2e-6, help='some l2 regularization')
+    parser.add_argument('--one_npi_per_model', action='store_true', help='train separate models for each npi')
 
     # model configs
     parser.add_argument('--seed', type=int, default=2020, help='random seed (default: 1)')
@@ -71,7 +72,10 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         self.rnn = nn.LSTM(lstm_input_size, hidden_size=self.configs['hidden_size'], bidirectional=False, \
             dropout=self.configs['dropout'], num_layers=self.configs['num_layers'], batch_first=True)
 
-        self.rnn_out = nn.Linear(self.configs['hidden_size'], self.configs['num_cnpis'], bias=True)
+        if self.configs['one_npi_per_model']:
+            self.rnn_out = nn.Linear(self.configs['hidden_size'], 1, bias=True)
+        else:
+            self.rnn_out = nn.Linear(self.configs['hidden_size'], self.configs['num_cnpis'], bias=True)
 
     def forward(self, batch_eta):
         if self.configs['embed_topic'] or self.configs['embed_topic_with_alpha']:
@@ -132,43 +136,44 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         self.log_dict({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
         self.logger.experiment.log({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
 
-        top_k_recalls = {
-            1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 1),
-            3: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 3),
-            5: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 5),
-            10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10),
-            }
-        top_k_recalls_log = {f"recall/{key}": value for key, value in top_k_recalls.items()}
-        top_k_recalls_log.update({'epoch': self.current_epoch, 'step': self.global_step})
-        # self.log_dict(top_k_recalls_log)
-        self.logger.experiment.log(top_k_recalls_log)
-        top_k_precs = {
-            1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 1, 'prec'),
-            3: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 3, 'prec'),
-            5: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 5, 'prec'),
-            10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
-                batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10, 'prec'),
-            }
-        top_k_precs_log = {f"prec/{key}": value for key, value in top_k_precs.items()}
-        top_k_precs_log.update({'epoch': self.current_epoch, 'step': self.global_step})
-        # self.log_dict(top_k_precs_log)
-        self.logger.experiment.log(top_k_precs_log)
-        top_k_f1s = {
-            k: (2 * top_k_recalls[k] * top_k_precs[k]) / \
-                (top_k_recalls[k] + top_k_precs[k]) for k in [1, 3, 5, 10]
-            }
-        top_k_f1s_log = {f"f1/{key}": value for key, value in top_k_f1s.items()}
-        top_k_f1s_log.update({'epoch': self.current_epoch, 'step': self.global_step})
-        # self.log_dict(top_k_f1s_log)
-        self.logger.experiment.log(top_k_f1s_log)
-        # return results
+        if not self.configs['one_npi_per_model']:
+            top_k_recalls = {
+                1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 1),
+                3: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 3),
+                5: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 5),
+                10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10),
+                }
+            top_k_recalls_log = {f"recall/{key}": value for key, value in top_k_recalls.items()}
+            top_k_recalls_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+            # self.log_dict(top_k_recalls_log)
+            self.logger.experiment.log(top_k_recalls_log)
+            top_k_precs = {
+                1: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 1, 'prec'),
+                3: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 3, 'prec'),
+                5: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 5, 'prec'),
+                10: self.compute_top_k_recall_prec(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
+                    batch_predictions_masked.reshape(-1, batch_predictions_masked.shape[-1]), 10, 'prec'),
+                }
+            top_k_precs_log = {f"prec/{key}": value for key, value in top_k_precs.items()}
+            top_k_precs_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+            # self.log_dict(top_k_precs_log)
+            self.logger.experiment.log(top_k_precs_log)
+            top_k_f1s = {
+                k: (2 * top_k_recalls[k] * top_k_precs[k]) / \
+                    (top_k_recalls[k] + top_k_precs[k]) for k in [1, 3, 5, 10]
+                }
+            top_k_f1s_log = {f"f1/{key}": value for key, value in top_k_f1s.items()}
+            top_k_f1s_log.update({'epoch': self.current_epoch, 'step': self.global_step})
+            # self.log_dict(top_k_f1s_log)
+            self.logger.experiment.log(top_k_f1s_log)
+            # return results
 
     def compute_auprc_breakdown(self, labels, predictions, average=None):
         '''
@@ -179,10 +184,11 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         output:
         - auprcs: array, (number of classes) if average is None, or scalar otherwise
         '''
-        # remove ones without positive labels
-        has_pos_labels = labels.sum(1) != 0
-        labels = labels[has_pos_labels, :]
-        predictions = predictions[has_pos_labels, :]
+        if labels.shape[1] > 1:
+            # remove ones without positive labels
+            has_pos_labels = labels.sum(1) != 0
+            labels = labels[has_pos_labels, :]
+            predictions = predictions[has_pos_labels, :]
         
         labels = labels.cpu().numpy()
         if labels.size == 0:    # empty
@@ -210,8 +216,11 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         batch_bows, batch_labels, batch_mask = batch
         # breakdown by measure
         cnpi_auprcs_breakdown = self.get_cnpi_auprcs(batch_bows, batch_labels, batch_mask)
-        cnpi_auprcs_breakdown_out = {label_idx_to_label[label_idx]: cnpi_auprcs_breakdown[label_idx] \
-                for label_idx, auprc in enumerate(cnpi_auprcs_breakdown) if not np.isnan(auprc)}
+        if self.configs['one_npi_per_model']:
+            cnpi_auprcs_breakdown_out = {label_idx_to_label[self.configs['current_cnpi']]: cnpi_auprcs_breakdown}
+        else:
+            cnpi_auprcs_breakdown_out = {label_idx_to_label[label_idx]: cnpi_auprcs_breakdown[label_idx] \
+                    for label_idx, auprc in enumerate(cnpi_auprcs_breakdown) if not np.isnan(auprc)}
         
         auprc_df = pd.DataFrame.from_dict(cnpi_auprcs_breakdown_out, \
             orient='index')
@@ -229,6 +238,7 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             orient='index')
         auprc_source_df.columns = ['auprc']
         auprc_source_df["source"] = auprc_source_df.index
+        auprc_source_df["measure"] = label_idx_to_label[self.configs['current_cnpi']]
         wandb_table = wandb.Table(dataframe=auprc_source_df)
         self.logger.experiment.log({"AUPRC breakdown by source": wandb_table})
 
@@ -286,48 +296,100 @@ if __name__ == '__main__':
     torch.backends.cudnn.deterministic = True
     torch.manual_seed(args.seed)
 
-    # initiate data module
-    data_module = COVID_Eta_Data_Module(configs)
+    if not configs['one_npi_per_model']:
+        # initiate data module
+        data_module = COVID_Eta_Data_Module(configs)
 
-    # initiate model
-    model = RNN_CNPI_EtaModel(configs)
-    if args.test:
-        checkpoint = torch.load(args.checkpoint)
-        # model = RNN_CNPI_BaseModel.load_from_checkpoint(
-        #     checkpoint_path=args.checkpoint,
-        # )
-        model.load_state_dict(checkpoint['state_dict'])
+        # initiate model
+        model = RNN_CNPI_EtaModel(configs)
+        if args.test:
+            checkpoint = torch.load(args.checkpoint)
+            # model = RNN_CNPI_BaseModel.load_from_checkpoint(
+            #     checkpoint_path=args.checkpoint,
+            # )
+            model.load_state_dict(checkpoint['state_dict'])
 
-    # train
-    # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
-    tags = ["RNN on eta", args.dataset, configs['eta_path'].split('/')[-1]]
-    if configs['embed_topic']:
-        tags.append('Train topic embeddings')
-    if configs['embed_topic_with_alpha']:
-        tags.append('Use alpha embeddings')
-    if args.test:
-        tags.append("Test")
-    wb_logger = pl_loggers.WandbLogger(
-        name=f"{time_stamp}",
-        project="covid",
-        tags=tags,
-        )
-    wb_logger.log_hyperparams(args)
-    trainer = pl.Trainer(
-        gradient_clip_val=args.clip, 
-        max_epochs=args.epochs, 
-        gpus=1, 
-        logger=wb_logger,
-        weights_save_path=os.path.join(configs['save_path'], time_stamp)
-        )
-    if not args.test:
-        trainer.fit(model, data_module)
-        trainer.test()
+        # train
+        # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
+        tags = ["RNN on eta", args.dataset, configs['eta_path'].split('/')[-1]]
+        if configs['embed_topic']:
+            tags.append('Train topic embeddings')
+        if configs['embed_topic_with_alpha']:
+            tags.append('Use alpha embeddings')
+        if args.test:
+            tags.append("Test")
+        wb_logger = pl_loggers.WandbLogger(
+            name=f"{time_stamp}",
+            project="covid",
+            tags=tags,
+            )
+        wb_logger.log_hyperparams(args)
+        trainer = pl.Trainer(
+            gradient_clip_val=args.clip, 
+            max_epochs=args.epochs, 
+            gpus=1, 
+            logger=wb_logger,
+            weights_save_path=os.path.join(configs['save_path'], time_stamp)
+            )
+        if not args.test:
+            trainer.fit(model, data_module)
+            trainer.test()
+        else:
+            trainer.test(model, datamodule=data_module)
+        # save predictions
+        with torch.no_grad():
+            for data, _, _ in data_module.test_dataloader():
+                test_predictions = model(data.to(torch.device('cuda')))
+            # should be only 1 batch
+            torch.save(test_predictions, os.path.join(configs['save_path'], time_stamp, 'test_predictions.pt'))
     else:
-        trainer.test(model, datamodule=data_module)
-    # save predictions
-    with torch.no_grad():
-        for data, _, _ in data_module.test_dataloader():
-            test_predictions = model(data.to(torch.device('cuda')))
-        # should be only 1 batch
-        torch.save(test_predictions, os.path.join(configs['save_path'], time_stamp, 'test_predictions.pt'))
+        for current_cnpi in range(configs['num_cnpis']):
+            configs['current_cnpi'] = current_cnpi
+
+            # initiate data module
+            data_module = COVID_Eta_Data_Module(configs)
+
+            # initiate model
+            model = RNN_CNPI_EtaModel(configs)
+            if args.test:
+                checkpoint = torch.load(args.checkpoint)
+                # model = RNN_CNPI_BaseModel.load_from_checkpoint(
+                #     checkpoint_path=args.checkpoint,
+                # )
+                model.load_state_dict(checkpoint['state_dict'])
+
+            # train
+            # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
+            tags = ["RNN on eta", args.dataset, configs['eta_path'].split('/')[-1], "One per NPI"]
+            if configs['embed_topic']:
+                tags.append('Train topic embeddings')
+            if configs['embed_topic_with_alpha']:
+                tags.append('Use alpha embeddings')
+            if args.test:
+                tags.append("Test")
+            wb_logger = pl_loggers.WandbLogger(
+                name=label_idx_to_label[current_cnpi],
+                project="covid",
+                tags=tags,
+                group=time_stamp,
+                )
+            wb_logger.log_hyperparams(args)
+            trainer = pl.Trainer(
+                gradient_clip_val=args.clip, 
+                max_epochs=args.epochs, 
+                gpus=1, 
+                logger=wb_logger,
+                weights_save_path=os.path.join(configs['save_path'], time_stamp, f"{current_cnpi}")
+                )
+            if not args.test:
+                trainer.fit(model, data_module)
+                trainer.test()
+            else:
+                trainer.test(model, datamodule=data_module)
+            # save predictions
+            with torch.no_grad():
+                for data, _, _ in data_module.test_dataloader():
+                    test_predictions = model(data.to(torch.device('cuda')))
+                # should be only 1 batch
+                torch.save(test_predictions, \
+                    os.path.join(configs['save_path'], time_stamp, f"{current_cnpi}", 'test_predictions.pt'))

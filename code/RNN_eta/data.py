@@ -86,6 +86,10 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
         cnpi_mask = torch.from_numpy(cnpi_mask).type('torch.LongTensor')
         cnpi_mask = cnpi_mask.unsqueeze(-1).expand(cnpis.size())    # match cnpis' shape to apply masking
 
+        if self.configs['one_npi_per_model']:
+            cnpis = cnpis[:, :, self.configs['current_cnpi']].unsqueeze(dim=-1)
+            cnpi_mask = cnpi_mask[:, :, self.configs['current_cnpi']].unsqueeze(dim=-1)
+
         # construct training and validation datasets
         self.train_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
         self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
