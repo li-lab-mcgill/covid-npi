@@ -825,9 +825,13 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     # Split in train/test/valid
     print('tokenizing documents and splitting into train/test/valid...')
     num_docs_tr = len(init_docs_tr)
-    trSize = num_docs_tr-100
+    # trSize = num_docs_tr-100
+    # tsSize = len(init_docs_ts)
+    # vaSize = 100
+    vaSize = int(0.01 * num_docs_tr) 
+    trSize = num_docs_tr - vaSize
     tsSize = len(init_docs_ts)
-    vaSize = 100
+    
     idx_permute = np.random.permutation(num_docs_tr).astype(int)
     print("idx permute:")
     print(idx_permute)
