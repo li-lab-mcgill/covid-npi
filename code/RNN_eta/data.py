@@ -8,22 +8,30 @@ import pytorch_lightning as pl
 import numpy as np
 
 class COVID_Eta_Dataset(Dataset):
-    def __init__(self, eta, cnpis, cnpi_mask):
+    def __init__(self, eta, cnpis, cnpi_mask, forecast=False):
         super().__init__()
 
         self.eta = eta
 
         self.cnpis = cnpis
         self.cnpi_mask = cnpi_mask
+        self.num_timestamps = cnpis.shape[1]
+
+        self.forecast = forecast
 
     def __len__(self):
         return self.eta.shape[0]
 
     def __getitem__(self, country_idx):
-        batch_eta = self.eta[country_idx]
-        labels = self.cnpis[country_idx]
-        mask = self.cnpi_mask[country_idx, :, :]
-
+        if not self.forecast:
+            batch_eta = self.eta[country_idx]
+            labels = self.cnpis[country_idx]
+            mask = self.cnpi_mask[country_idx, :, :]
+        else:
+            batch_eta = self.eta[country_idx, :self.num_timestamps - 1, :]
+            labels = self.cnpis[country_idx, 1: , :]
+            mask = self.cnpi_mask[country_idx, 1:, :]
+        
         return batch_eta, labels, mask
 
 class COVID_Eta_Data_Module(pl.LightningDataModule):
@@ -80,9 +88,13 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
         num_cnpis = cnpis.shape[-1]
         cnpis = torch.from_numpy(cnpis)
         # load mask
-        cnpi_mask_file = os.path.join(self.path, 'cnpi_mask.pkl')
+        cnpi_mask_file = os.path.join(self.path, 'cnpi_mask_forecast.pkl') \
+            if self.configs['forecast'] else os.path.join(self.path, 'cnpi_mask.pkl')
         with open(cnpi_mask_file, 'rb') as file:
             cnpi_mask = pickle.load(file)
+        if self.configs['forecast']:
+            assert cnpi_mask[:, int(cnpi_mask.shape[1] / 2): ].sum() == 0, \
+                "not all second-half time points are masked for evaluation"
         cnpi_mask = torch.from_numpy(cnpi_mask).type('torch.LongTensor')
         cnpi_mask = cnpi_mask.unsqueeze(-1).expand(cnpis.size())    # match cnpis' shape to apply masking
 
@@ -91,9 +103,9 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
             cnpi_mask = cnpi_mask[:, :, self.configs['current_cnpi']].unsqueeze(dim=-1)
 
         # construct training and validation datasets
-        self.train_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
-        self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
-        self.test_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask)
+        self.train_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
+        self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
+        self.test_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True)
