@@ -1185,19 +1185,19 @@ if args.mode == 'train':
             writer.add_scalar('PPL/val', val_ppl, epoch)
         else:
             wandb.log({'PPL/val': val_ppl, 'epoch': epoch})
-        if (epoch - 1) % 20 == 0:
-            tq, tc, td = get_topic_quality()
-            if args.logger == 'tb':
-                writer.add_scalar('Topic/quality', tq, epoch)
-                writer.add_scalar('Topic/coherence', tc, epoch)
-                writer.add_scalar('Topic/diversity', td, epoch)
-            else:
-                wandb.log({
-                    'Topic/quality': tq,
-                    'Topic/coherence': tc,
-                    'Topic/diversity': td,
-                    'epoch': epoch,
-                })
+        # if (epoch - 1) % 20 == 0:
+        #     tq, tc, td = get_topic_quality()
+        #     if args.logger == 'tb':
+        #         writer.add_scalar('Topic/quality', tq, epoch)
+        #         writer.add_scalar('Topic/coherence', tc, epoch)
+        #         writer.add_scalar('Topic/diversity', td, epoch)
+        #     else:
+        #         wandb.log({
+        #             'Topic/quality': tq,
+        #             'Topic/coherence': tc,
+        #             'Topic/diversity': td,
+        #             'epoch': epoch,
+        #         })
         if args.predict_cnpi:
             # cnpi top k recall on validation set
             val_cnpi_results = get_cnpi_top_k_metrics(cnpis, cnpi_mask, 'val')
