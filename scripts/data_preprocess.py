@@ -17,6 +17,7 @@ import pickle as pkl
 from argparse import ArgumentParser
 from datetime import datetime #Add import
 import calendar
+import epiweeks
 import nltk
 nltk.download('words')
 words = set(nltk.corpus.words.words())
@@ -386,23 +387,29 @@ def read_data(data_file, dataset, full_data=False, label_harm=False):
                     t = timestamp[0:3]+timestamp[3:]
                     d = datetime.strptime(t.replace(':','').replace('--','-'), '%Y-%m-%d')
 
-            #Get the week of the month
-            week_month = get_week_of_month(d.year,d.month,d.day)
+            # code below uses calender week
+            # #Get the week of the month
+            # week_month = get_week_of_month(d.year,d.month,d.day)
             
-            #Original date
-            original_date = '{}-{}-{}'.format(d.year,d.month,d.day)
-            #Test file with original dates for gphin week data
-            date_test = "Original Date (Y,M,D) -> {}, Week Date (Y,M,W) -> {}-0{}-{}    \n".format(original_date, d.isocalendar()[0], d.month, week_month) #Week number instead of days
-            # the 3 lines below look like some mysterious testing code
-            # f = open("original_date_week_comparison.txt", "a")
-            # f.write(date_test)
-            # f.close()
+            # #Original date
+            # original_date = '{}-{}-{}'.format(d.year,d.month,d.day)
+            # #Test file with original dates for gphin week data
+            # date_test = "Original Date (Y,M,D) -> {}, Week Date (Y,M,W) -> {}-0{}-{}    \n".format(original_date, d.isocalendar()[0], d.month, week_month) #Week number instead of days
+            # # the 3 lines below look like some mysterious testing code
+            # # f = open("original_date_week_comparison.txt", "a")
+            # # f.write(date_test)
+            # # f.close()
 
-            #Print month and date with week format (1-4)
-            # don't know why adding a 0 to month
-            # d = "{}-0{}-{}".format(d.isocalendar()[0], d.month, week_month) #Week number instead of days
-            d = "{}-{}-{}".format(d.isocalendar()[0], d.month, week_month) #Week number instead of days
-            all_times.append(d)
+            # #Print month and date with week format (1-4)
+            # # don't know why adding a 0 to month
+            # # d = "{}-0{}-{}".format(d.isocalendar()[0], d.month, week_month) #Week number instead of days
+            # d = "{}-{}-{}".format(d.isocalendar()[0], d.month, week_month) #Week number instead of days
+            # all_times.append(d)
+
+            # code below uses cdc week
+            cdc_week = epiweeks.Week.fromdate(d)
+            cdc_week_str = f"{cdc_week.year}-{cdc_week.week}"
+            all_times.append(cdc_week_str)
 
 		#Update column value with weeks array : 
         gphin_data[dataset_to_timestamp_colnames[dataset]] = all_times
@@ -756,8 +763,14 @@ def get_cnpis(countries_to_idx, time2id, labels_filename, label_map, label_harm,
     # reduce temporal resolution to week to align with time2id
     def normalize_time(date_start):
         d = datetime.strptime(date_start, "%d/%m/%Y")
-        week_month = get_week_of_month(d.year,d.month,d.day)
-        return "{}-{}-{}".format(d.isocalendar()[0], d.month, week_month)
+        # code below returns calender week
+        # week_month = get_week_of_month(d.year,d.month,d.day)
+        # return "{}-{}-{}".format(d.isocalendar()[0], d.month, week_month)
+
+        # code below returns cdc week
+        cdc_week = epiweeks.Week.fromdate(d)
+        return f"{cdc_week.year}-{cdc_week.week}"
+
     new_cnpis_df["norm_date_start"] = new_cnpis_df.date_start.apply(normalize_time)
 
     new_labels_dict = {}
