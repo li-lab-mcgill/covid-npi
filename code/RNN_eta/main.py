@@ -175,12 +175,12 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
                         self(batch_eta[:, time_idx, :].unsqueeze(1), batch_labels[:, time_idx, :].unsqueeze(1), \
                             rnn_hidden_state, rnn_cell_state)
                 else:   # in testing time points
-                    current_batch_predictions = torch.sigmoid(current_batch_predictions).detach()
                     # use predictions from the previous time point instead of true labels
                     current_batch_predictions, rnn_hidden_state, rnn_cell_state = \
                         self(batch_eta[:, time_idx, :].unsqueeze(1), current_batch_predictions.round(), \
                             rnn_hidden_state, rnn_cell_state)
-                    batch_predictions[:, time_idx, :] = current_batch_predictions.squeeze()
+                current_batch_predictions = torch.sigmoid(current_batch_predictions).detach()
+                batch_predictions[:, time_idx, :] = current_batch_predictions.squeeze()
             
         return batch_predictions
     
