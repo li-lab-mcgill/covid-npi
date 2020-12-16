@@ -118,25 +118,25 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         if not self.configs['forecast']:
             batch_predictions = self(batch_eta)
             return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
-        elif not self.configs['teacher_force']:
-            batch_predictions = self(batch_eta)
+        else:
+            if not self.configs['teacher_force']:
+                batch_predictions = self(batch_eta)
+            else:
+                # teacher forcing
+                rnn_hidden_state = rnn_cell_state = \
+                    torch.zeros((self.configs['num_layers'], batch_eta.shape[0], self.configs['hidden_size'])).to(self.device)
+                # batch_predictions holds all predictions
+                batch_predictions = torch.zeros((batch_eta.shape[0], batch_eta.shape[1], batch_labels.shape[-1])).to(self.device)
+                for time_idx in range(batch_eta.shape[1]):
+                    if batch_mask[:, time_idx, :].sum() == 0:   # end of training time points
+                        break
+                    current_batch_predictions, rnn_hidden_state, rnn_cell_state = \
+                        self(batch_eta[:, time_idx, :].unsqueeze(1), batch_labels[:, time_idx, :].unsqueeze(1), \
+                            rnn_hidden_state, rnn_cell_state)
+                    batch_predictions[:, time_idx, :] = current_batch_predictions.squeeze()
             batch_labels = batch_labels[:, 1: , :]
             batch_mask = batch_mask[:, 1:, :]
             return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
-        else:
-            # teacher forcing
-            loss = 0
-            rnn_hidden_state = rnn_cell_state = \
-                torch.zeros((self.configs['num_layers'], batch_eta.shape[0], self.configs['hidden_size'])).to(self.device)
-            for time_idx in range(batch_eta.shape[1]):
-                if batch_mask[:, time_idx, :].sum() == 0:   # end of training time points
-                    break
-                batch_predictions, rnn_hidden_state, rnn_cell_state = \
-                    self(batch_eta[:, time_idx, :].unsqueeze(1), batch_labels[:, time_idx, :].unsqueeze(1), \
-                        rnn_hidden_state, rnn_cell_state)
-                loss += F.binary_cross_entropy_with_logits(batch_predictions, \
-                    batch_labels[:, time_idx + 1, :].unsqueeze(1))
-            return loss / batch_eta.shape[1]
 
     def compute_top_k_recall_prec(self, labels, predictions, k=5, metric='recall'):
         '''
