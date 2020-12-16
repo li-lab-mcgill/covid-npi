@@ -276,6 +276,11 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
                 batch_predictions_masked[source_idx, :, :], average='micro') \
                     for source_idx in range(batch_labels_masked.shape[0])])
 
+    def get_cnpi_supports(self, labels, mask):
+        cnpis_masked = labels * (1 - mask)
+        testing_cnpi_cnts = cnpis_masked.view(-1, cnpis_masked.shape[-1]).sum(0).tolist()
+        return np.array(testing_cnpi_cnts) / np.sum(testing_cnpi_cnts)
+
     def test_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
         # breakdown by measure
@@ -292,6 +297,13 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         auprc_df["measure"] = auprc_df.index
         wandb_table = wandb.Table(dataframe=auprc_df)
         self.logger.experiment.log({"AUPRC breakdown": wandb_table})
+
+        # log average auprc
+        testing_cnpi_cnts_normed = self.get_cnpi_supports(batch_labels, batch_mask)
+        self.logger.experiment.log({
+            "Average AUPRC, weighted": np.average(cnpi_auprcs_breakdown, weights=testing_cnpi_cnts_normed)
+        })
+        self.logger.experiment.log({"Average AUPRC, macro": np.mean(cnpi_auprcs_breakdown)})
 
         # breakdown by source
         cnpi_auprcs_breakdown_source = self.get_cnpi_auprcs(batch_eta, batch_labels, batch_mask, breakdown_by='source')
