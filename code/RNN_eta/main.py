@@ -35,10 +35,13 @@ def parse_args():
     parser.add_argument('--mode', type=str, default='train', help='train or eval model')
     parser.add_argument('--wdecay', type=float, default=1.2e-6, help='some l2 regularization')
     parser.add_argument('--one_npi_per_model', action='store_true', help='train separate models for each npi')
+    parser.add_argument('--forecast', action='store_true', help='train to forecast')
+    parser.add_argument('--teacher_force', action='store_true', help='teacher forcing. only effective when forecasting')
 
     # model configs
     parser.add_argument('--seed', type=int, default=2020, help='random seed (default: 1)')
     parser.add_argument('--emb_size', type=int, default=300, help='dimension of mapping')
+    parser.add_argument('--no_bi_lstm', action='store_true', help='not using bidirectional lstm')
     parser.add_argument('--hidden_size', type=int, default=128, help='rnn hidden size')
     parser.add_argument('--dropout', type=float, default=0.1, help='dropout rate')
     parser.add_argument('--num_layers', type=int, default=1, help='number of rnn layers')
@@ -69,21 +72,34 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         else:
             lstm_input_size = self.configs['num_topics']
 
-        self.rnn = nn.LSTM(lstm_input_size, hidden_size=self.configs['hidden_size'], bidirectional=False, \
+        if self.configs['teacher_force']:
+            lstm_input_size += self.configs['num_cnpis']
+
+        self.rnn = nn.LSTM(lstm_input_size, hidden_size=self.configs['hidden_size'], bidirectional=self.configs['bi_lstm'], \
             dropout=self.configs['dropout'], num_layers=self.configs['num_layers'], batch_first=True)
+        rnn_out_size = self.configs['hidden_size'] if not self.configs['bi_lstm'] else self.configs['hidden_size'] * 2
 
         if self.configs['one_npi_per_model']:
-            self.rnn_out = nn.Linear(self.configs['hidden_size'], 1, bias=True)
+            self.output = nn.Linear(rnn_out_size, 1, bias=True)
         else:
-            self.rnn_out = nn.Linear(self.configs['hidden_size'], self.configs['num_cnpis'], bias=True)
+            self.output = nn.Linear(rnn_out_size, self.configs['num_cnpis'], bias=True)
 
-    def forward(self, batch_eta):
+    def forward(self, batch_eta, batch_label=None, rnn_hidden_state=None, rnn_cell_state=None):
         if self.configs['embed_topic'] or self.configs['embed_topic_with_alpha']:
             batch_eta = self.topic_embed(batch_eta.view(-1, batch_eta.shape[-1]))\
                 .view(batch_eta.shape[0], batch_eta.shape[1], -1)
         # batch_eta: batch_size x times_span x (mapped_size or num_topics)
-        rnn_hidden = self.rnn(batch_eta)[0]
-        return self.rnn_out(rnn_hidden)
+        if not self.configs['teacher_force']:
+            rnn_out_state = self.rnn(batch_eta)[0]
+            return self.output(rnn_out_state)
+        else:
+            # batch_label could either be true npis of the previous time point (in training)
+            # or predicted npi probabilities (in testing)
+            # when teacher forcing, generate predictions one at a time
+            # so time span is 1, and the model is iteratively called
+            batch_input = torch.cat([batch_eta, batch_label.type(torch.float)], dim=-1)
+            rnn_out_state, (rnn_hidden_state, rnn_cell_state) = self.rnn(batch_input, (rnn_hidden_state, rnn_cell_state))
+            return self.output(rnn_out_state), rnn_hidden_state, rnn_cell_state
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.configs['lr'], weight_decay=self.configs['wdecay'])
@@ -99,8 +115,28 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
-        batch_predictions = self(batch_eta)
-        return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+        if not self.configs['forecast']:
+            batch_predictions = self(batch_eta)
+            return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+        elif not self.configs['teacher_force']:
+            batch_predictions = self(batch_eta)
+            batch_labels = batch_labels[:, 1: , :]
+            batch_mask = batch_mask[:, 1:, :]
+            return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+        else:
+            # teacher forcing
+            loss = 0
+            rnn_hidden_state = rnn_cell_state = \
+                torch.zeros((self.configs['num_layers'], batch_eta.shape[0], self.configs['hidden_size'])).to(self.device)
+            for time_idx in range(batch_eta.shape[1]):
+                if batch_mask[:, time_idx, :].sum() == 0:   # end of training time points
+                    break
+                batch_predictions, rnn_hidden_state, rnn_cell_state = \
+                    self(batch_eta[:, time_idx, :].unsqueeze(1), batch_labels[:, time_idx, :].unsqueeze(1), \
+                        rnn_hidden_state, rnn_cell_state)
+                loss += F.binary_cross_entropy_with_logits(batch_predictions, \
+                    batch_labels[:, time_idx + 1, :].unsqueeze(1))
+            return loss / batch_eta.shape[1]
 
     def compute_top_k_recall_prec(self, labels, predictions, k=5, metric='recall'):
         '''
@@ -123,13 +159,39 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             return (torch.gather(labels, 1, idxs).sum(1) / labels.sum(1)).mean()
         else:
             return (torch.gather(labels, 1, idxs).sum(1) / k).mean()
+
+    def get_batch_predictions_eval(self, batch_eta, batch_labels, batch_mask):
+        if not self.configs['teacher_force']:
+            batch_predictions = self(batch_eta)
+        else:
+            # teacher forcing
+            rnn_hidden_state = rnn_cell_state = \
+                torch.zeros((self.configs['num_layers'], batch_eta.shape[0], self.configs['hidden_size'])).to(self.device)
+            # batch_predictions holds all predictions
+            batch_predictions = torch.zeros((batch_eta.shape[0], batch_eta.shape[1], batch_labels.shape[-1])).to(self.device)
+            for time_idx in range(batch_eta.shape[1]):
+                if batch_mask[:, time_idx, :].sum() > 0:   # in training time points
+                    current_batch_predictions, rnn_hidden_state, rnn_cell_state = \
+                        self(batch_eta[:, time_idx, :].unsqueeze(1), batch_labels[:, time_idx, :].unsqueeze(1), \
+                            rnn_hidden_state, rnn_cell_state)
+                else:   # in testing time points
+                    current_batch_predictions = torch.sigmoid(current_batch_predictions).detach()
+                    # use predictions from the previous time point instead of true labels
+                    current_batch_predictions, rnn_hidden_state, rnn_cell_state = \
+                        self(batch_eta[:, time_idx, :].unsqueeze(1), current_batch_predictions, \
+                            rnn_hidden_state, rnn_cell_state)
+                    batch_predictions[:, time_idx, :] = current_batch_predictions.squeeze()
+            
+        return batch_predictions
     
     def validation_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
-        batch_predictions = self(batch_eta)
-        batch_mask = 1 - batch_mask
-        batch_predictions_masked = batch_predictions * batch_mask
-        batch_labels_masked = batch_labels * batch_mask
+        batch_predictions = self.get_batch_predictions_eval(batch_eta, batch_labels, batch_mask)
+        if self.configs['forecast']:
+            batch_labels = batch_labels[:, 1: , :]
+            batch_mask = batch_mask[:, 1:, :]
+        batch_predictions_masked = batch_predictions * (1 - batch_mask)
+        batch_labels_masked = batch_labels * (1 - batch_mask)
 
         val_loss = F.binary_cross_entropy_with_logits(batch_predictions_masked, batch_labels_masked)
 
@@ -196,13 +258,15 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         predictions = predictions.cpu().numpy()
         return average_precision_score(labels, predictions, average=average)
 
-    def get_cnpi_auprcs(self, batch_bows, batch_labels, batch_mask, breakdown_by='measure'):
+    def get_cnpi_auprcs(self, batch_eta, batch_labels, batch_mask, breakdown_by='measure'):
         assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
 
-        batch_predictions = self(batch_bows)
-        batch_mask = 1 - batch_mask
-        batch_predictions_masked = batch_predictions * batch_mask
-        batch_labels_masked = batch_labels * batch_mask
+        batch_predictions = self.get_batch_predictions_eval(batch_eta, batch_labels, batch_mask)
+        if self.configs['forecast']:
+            batch_labels = batch_labels[:, 1: , :]
+            batch_mask = batch_mask[:, 1:, :]
+        batch_predictions_masked = batch_predictions * (1 - batch_mask)
+        batch_labels_masked = batch_labels * (1 - batch_mask)
 
         if breakdown_by == 'measure':
             return self.compute_auprc_breakdown(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
@@ -213,9 +277,9 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
                     for source_idx in range(batch_labels_masked.shape[0])])
 
     def test_step(self, batch, batch_idx):
-        batch_bows, batch_labels, batch_mask = batch
+        batch_eta, batch_labels, batch_mask = batch
         # breakdown by measure
-        cnpi_auprcs_breakdown = self.get_cnpi_auprcs(batch_bows, batch_labels, batch_mask)
+        cnpi_auprcs_breakdown = self.get_cnpi_auprcs(batch_eta, batch_labels, batch_mask)
         if self.configs['one_npi_per_model']:
             cnpi_auprcs_breakdown_out = {label_idx_to_label[self.configs['current_cnpi']]: cnpi_auprcs_breakdown}
         else:
@@ -230,7 +294,7 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         self.logger.experiment.log({"AUPRC breakdown": wandb_table})
 
         # breakdown by source
-        cnpi_auprcs_breakdown_source = self.get_cnpi_auprcs(batch_bows, batch_labels, batch_mask, breakdown_by='source')
+        cnpi_auprcs_breakdown_source = self.get_cnpi_auprcs(batch_eta, batch_labels, batch_mask, breakdown_by='source')
         cnpi_auprcs_breakdown_source_out = {source_idx_to_source[source_idx]: auprc \
                 for source_idx, auprc in enumerate(cnpi_auprcs_breakdown_source) if not np.isnan(auprc)}
         
@@ -238,7 +302,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             orient='index')
         auprc_source_df.columns = ['auprc']
         auprc_source_df["source"] = auprc_source_df.index
-        auprc_source_df["measure"] = label_idx_to_label[self.configs['current_cnpi']]
+        if self.configs['one_npi_per_model']:
+            auprc_source_df["measure"] = label_idx_to_label[self.configs['current_cnpi']]
         wandb_table = wandb.Table(dataframe=auprc_source_df)
         self.logger.experiment.log({"AUPRC breakdown by source": wandb_table})
 
@@ -246,6 +311,7 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
 
 if __name__ == '__main__':
     args = parse_args()
+    args.bi_lstm = not args.no_bi_lstm
     configs = vars(args)
 
     if args.test:
@@ -254,9 +320,15 @@ if __name__ == '__main__':
         print(f"Testing with checkpoint {args.checkpoint}")
 
     assert not (configs['embed_topic'] and configs['embed_topic_with_alpha']), \
-        "can not learn embedding if using alpha"
+        "cannot learn embedding if using alpha"
     if configs['embed_topic_with_alpha']:
         print("WARNING: emb_size is ineffective, will use alpha's dimension")
+
+    if configs['teacher_force'] and not configs['forecast']:
+        raise Exception("not forecasting, cannot teacher force")
+
+    assert not (configs['bi_lstm'] and configs['teacher_force']), \
+        "cannot use bi-LSTM when teacher forcing"
 
     time_stamp = time.strftime("%m-%d-%H-%M", time.localtime())
     print(f"Experiment time stamp: {time_stamp}")
@@ -311,13 +383,19 @@ if __name__ == '__main__':
 
         # train
         # tb_logger = pl_loggers.TensorBoardLogger(f"lightning_logs/{time_stamp}")
-        tags = ["RNN on eta", args.dataset, configs['eta_path'].split('/')[-1]]
+        tags = ["RNN on eta", args.dataset, configs['eta_path'].split('/')[-1], f"seed: {args.seed}"]
         if configs['embed_topic']:
             tags.append('Train topic embeddings')
         if configs['embed_topic_with_alpha']:
             tags.append('Use alpha embeddings')
+        if configs['bi_lstm']:
+            tags.append('Bi-LSTM')
         if args.test:
             tags.append("Test")
+        if configs['forecast']:
+            tags.append("Forecast")
+        if configs['teacher_force']:
+            tags.append('Teacher forcing')
         wb_logger = pl_loggers.WandbLogger(
             name=f"{time_stamp}",
             project="covid",
@@ -338,8 +416,10 @@ if __name__ == '__main__':
             trainer.test(model, datamodule=data_module)
         # save predictions
         with torch.no_grad():
-            for data, _, _ in data_module.test_dataloader():
-                test_predictions = model(data.to(torch.device('cuda')))
+            for data, labels, mask in data_module.test_dataloader():
+                test_predictions = model.get_batch_predictions_eval(
+                    data.to(model.device), labels.to(model.device), mask.to(model.device)
+                )
             # should be only 1 batch
             torch.save(test_predictions, os.path.join(configs['save_path'], time_stamp, 'test_predictions.pt'))
     else:
@@ -388,8 +468,10 @@ if __name__ == '__main__':
                 trainer.test(model, datamodule=data_module)
             # save predictions
             with torch.no_grad():
-                for data, _, _ in data_module.test_dataloader():
-                    test_predictions = model(data.to(torch.device('cuda')))
+                for data, labels, mask in data_module.test_dataloader():
+                    test_predictions = model.get_batch_predictions_eval(
+                        data.to(model.device), labels.to(model.device), mask.to(model.device)
+                    )
                 # should be only 1 batch
                 torch.save(test_predictions, \
                     os.path.join(configs['save_path'], time_stamp, f"{current_cnpi}", 'test_predictions.pt'))

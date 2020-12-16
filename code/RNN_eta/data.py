@@ -25,12 +25,10 @@ class COVID_Eta_Dataset(Dataset):
     def __getitem__(self, country_idx):
         if not self.forecast:
             batch_eta = self.eta[country_idx]
-            labels = self.cnpis[country_idx]
-            mask = self.cnpi_mask[country_idx, :, :]
         else:
             batch_eta = self.eta[country_idx, :self.num_timestamps - 1, :]
-            labels = self.cnpis[country_idx, 1: , :]
-            mask = self.cnpi_mask[country_idx, 1:, :]
+        labels = self.cnpis[country_idx]
+        mask = self.cnpi_mask[country_idx]
         
         return batch_eta, labels, mask
 
