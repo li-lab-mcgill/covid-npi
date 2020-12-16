@@ -106,12 +106,12 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
         self.test_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True)
+        return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True, num_workers=4)
 
     def val_dataloader(self):
         # evaluate all countries at once
-        return DataLoader(self.eval_dataset, batch_size=self.num_sources, shuffle=True)
+        return DataLoader(self.eval_dataset, batch_size=self.num_sources, shuffle=True, num_workers=4)
 
     def test_dataloader(self):
         # evaluate all countries at once
-        return DataLoader(self.test_dataset, batch_size=self.num_sources, shuffle=True)
+        return DataLoader(self.test_dataset, batch_size=self.num_sources, shuffle=True, num_workers=4)
