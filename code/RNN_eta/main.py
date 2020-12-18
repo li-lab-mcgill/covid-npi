@@ -299,11 +299,12 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         self.logger.experiment.log({"AUPRC breakdown": wandb_table})
 
         # log average auprc
-        testing_cnpi_cnts_normed = self.get_cnpi_supports(batch_labels, batch_mask)
-        self.logger.experiment.log({
-            "Average AUPRC, weighted": np.average(cnpi_auprcs_breakdown, weights=testing_cnpi_cnts_normed)
-        })
-        self.logger.experiment.log({"Average AUPRC, macro": np.mean(cnpi_auprcs_breakdown)})
+        if not self.configs['one_npi_per_model']:
+            testing_cnpi_cnts_normed = self.get_cnpi_supports(batch_labels, batch_mask)
+            self.logger.experiment.log({
+                "Average AUPRC, weighted": np.average(cnpi_auprcs_breakdown, weights=testing_cnpi_cnts_normed)
+            })
+            self.logger.experiment.log({"Average AUPRC, macro": np.mean(cnpi_auprcs_breakdown)})
 
         # breakdown by source
         cnpi_auprcs_breakdown_source = self.get_cnpi_auprcs(batch_eta, batch_labels, batch_mask, breakdown_by='source')
