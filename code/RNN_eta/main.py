@@ -37,6 +37,7 @@ def parse_args():
     parser.add_argument('--one_npi_per_model', action='store_true', help='train separate models for each npi')
     parser.add_argument('--forecast', action='store_true', help='train to forecast')
     parser.add_argument('--teacher_force', action='store_true', help='teacher forcing. only effective when forecasting')
+    parser.add_argument('--random_baseline', action='store_true', help='randomly permute topics as a baseline')
 
     # model configs
     parser.add_argument('--seed', type=int, default=2020, help='random seed (default: 1)')
@@ -409,6 +410,8 @@ if __name__ == '__main__':
             tags.append("Forecast")
         if configs['teacher_force']:
             tags.append('Teacher forcing')
+        if configs['random_baseline']:
+            tags.append('Random baseline')
         wb_logger = pl_loggers.WandbLogger(
             name=f"{time_stamp}",
             project="covid",
@@ -438,6 +441,7 @@ if __name__ == '__main__':
     else:
         for current_cnpi in range(configs['num_cnpis']):
             configs['current_cnpi'] = current_cnpi
+            print(f"Current CNPI: {label_idx_to_label[current_cnpi]}")
 
             # initiate data module
             data_module = COVID_Eta_Data_Module(configs)
@@ -466,6 +470,7 @@ if __name__ == '__main__':
                 tags=tags,
                 group=time_stamp,
                 )
+            assert wb_logger.name == label_idx_to_label[current_cnpi]
             wb_logger.log_hyperparams(args)
             trainer = pl.Trainer(
                 gradient_clip_val=args.clip, 

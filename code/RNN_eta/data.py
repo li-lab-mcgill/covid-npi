@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 import numpy as np
 
 class COVID_Eta_Dataset(Dataset):
-    def __init__(self, eta, cnpis, cnpi_mask, forecast=False):
+    def __init__(self, eta, cnpis, cnpi_mask, forecast=False, random_baseline=False):
         super().__init__()
 
         self.eta = eta
@@ -18,6 +18,7 @@ class COVID_Eta_Dataset(Dataset):
         self.num_timestamps = cnpis.shape[1]
 
         self.forecast = forecast
+        self.random_baseline = random_baseline
 
     def __len__(self):
         return self.eta.shape[0]
@@ -27,6 +28,10 @@ class COVID_Eta_Dataset(Dataset):
             batch_eta = self.eta[country_idx]
         else:
             batch_eta = self.eta[country_idx, :self.num_timestamps - 1, :]
+
+        if self.random_baseline:
+            batch_eta = batch_eta[:, torch.randperm(batch_eta.shape[-1], dtype=torch.long)]
+
         labels = self.cnpis[country_idx]
         mask = self.cnpi_mask[country_idx]
         
@@ -101,9 +106,9 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
             cnpi_mask = cnpi_mask[:, :, self.configs['current_cnpi']].unsqueeze(dim=-1)
 
         # construct training and validation datasets
-        self.train_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
-        self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
-        self.test_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'])
+        self.train_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'], random_baseline=self.configs['random_baseline'])
+        self.eval_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'], random_baseline=self.configs['random_baseline'])
+        self.test_dataset = COVID_Eta_Dataset(eta, cnpis, cnpi_mask, forecast=self.configs['forecast'], random_baseline=self.configs['random_baseline'])
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset, batch_size=self.configs['batch_size'], shuffle=True, num_workers=4)
