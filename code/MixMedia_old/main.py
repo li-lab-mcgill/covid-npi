@@ -613,6 +613,47 @@ def get_theta(eta, embs, times, sources):
         # print(q_theta)   
         return theta
 
+def get_theta_for_source(source):
+    # get the theta for all docs of the specified source
+    assert source in ["train", "val", "test"]
+
+    data_by_source = {
+        "train": (len(train_indices_order), train_tokens, train_counts, train_times, train_sources, train_labels),
+        "val": (len(valid_indices_order), valid_tokens, valid_counts, valid_times, valid_sources, valid_labels),
+        "test": (len(test_indices_order), test_tokens, test_counts, test_times, test_sources, test_labels),
+    }
+
+    model.eval()
+
+    thetas = []
+
+    with torch.no_grad():
+        alpha = model.mu_q_alpha # KxTxL       
+        indice_length, tokens, counts, times, sources, labels = data_by_source[source]
+
+        indices = torch.tensor(np.arange(indice_length))
+        indices = torch.split(indices, args.eval_batch_size)  
+
+        eta = get_eta(source)
+
+        for idx, ind in enumerate(indices):
+            
+            data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
+                tokens, counts, ind, sources, labels, 
+                args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+            sums = data_batch.sum(1).unsqueeze(1)
+
+            if args.bow_norm:
+                normalized_data_batch = data_batch / sums
+            else:
+                normalized_data_batch = data_batch
+        
+            theta = get_theta(eta, normalized_data_batch, times_batch, sources_batch)
+            thetas.append(theta)
+
+    return torch.cat(thetas, dim=0)
+
 def get_completion_ppl(source):
     """Returns document completion perplexity.
     """
@@ -1321,6 +1362,11 @@ np.save(os.path.join(ckpt, 'eta_test.npy'), eta, allow_pickle=False)
 
 print('computing validation perplexity...')
 val_ppl, val_pdl = get_completion_ppl('val')
+
+print("getting theta for train/val/test")
+for split in ["train", "val", "test"]:
+    thetas = get_theta_for_source(split).cpu().detach().numpy()
+    np.save(os.path.join(ckpt, f"theta_{split}.npy"), thetas, allow_pickle=False)
 
 if args.predict_labels:
     # document labels prediction on validation set
