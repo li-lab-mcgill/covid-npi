@@ -99,7 +99,7 @@ def _fetch_temporal(path, name, predict=True, use_time=True, use_source=True, if
     # embs, emb_vocab_size = get_embs(path, name, if_one_hot, emb_vocab_size, q_theta_arc)
     
     if use_time:        
-        times = pickle_load(time_file)
+        times = np.array(pickle_load(time_file))
     else:
         times = np.zeros(tokens.shape[0])
 
@@ -158,42 +158,51 @@ def get_batch(tokens, counts, ind, sources, labels, vocab_size, emsize=300, temp
     batch_size = len(ind)
     data_batch = np.zeros((batch_size, vocab_size))
     
-    if temporal:
-        times_batch = np.zeros((batch_size, ))
+    # if temporal:
+        # times_batch = np.zeros((batch_size, ))
 
-    sources_batch = np.zeros((batch_size, ))
+    # sources_batch = np.zeros((batch_size, ))
 
-    if len(labels.shape) == 2: # multi-clas labels
-        labels_batch = np.zeros((batch_size, labels.shape[1])) 
-    else: # single-class of vector of integer class labels
-        labels_batch = np.zeros((batch_size, ))
+    # if len(labels.shape) == 2: # multi-clas labels
+    #     labels_batch = np.zeros((batch_size, labels.shape[1])) 
+    # else: # single-class of vector of integer class labels
+    #     labels_batch = np.zeros((batch_size, ))
     
     # set_trace()
 
-    for i, doc_id in enumerate(ind):        
+    # the for loop below is the original implementation
+    # for i, doc_id in enumerate(ind):        
         
-        doc = tokens[doc_id]
-        count = counts[doc_id]
+        # doc = tokens[doc_id]
+        # count = counts[doc_id]
 
-        source = sources[doc_id]
-        sources_batch[i] = source        
+        # source = sources[doc_id]
+        # sources_batch[i] = source        
         
-        label = labels[doc_id]
-        labels_batch[i] = label
+        # label = labels[doc_id]
+        # labels_batch[i] = label
 
-        if temporal:
-            timestamp = times[doc_id]
-            times_batch[i] = timestamp
+        # if temporal:
+            # timestamp = times[doc_id]
+            # times_batch[i] = timestamp
         
-        if len(doc) == 1: 
-            doc = [doc.squeeze()]
-            count = [count.squeeze()]
-        else:
-            doc = doc.squeeze()
-            count = count.squeeze()
-        if doc_id != -1:
-            for j, word in enumerate(doc):
-                data_batch[i, word] = count[j]
+        # if len(doc) == 1: 
+        #     doc = [doc.squeeze()]
+        #     count = [count.squeeze()]
+        # else:
+        #     doc = doc.squeeze()
+        #     count = count.squeeze()
+        # if doc_id != -1:
+        #     for j, word in enumerate(doc):
+        #         data_batch[i, word] = count[j]
+    
+    for batch_idx, doc_idx in enumerate(ind):
+        data_batch[batch_idx, tokens[doc_idx]] = counts[doc_idx]
+
+    sources_batch = sources[ind]
+    labels_batch = labels[ind]
+    if temporal:
+        times_batch = times[ind]
     
     data_batch = torch.from_numpy(data_batch).float().to(device)
     sources_batch = torch.from_numpy(sources_batch).to(device)
