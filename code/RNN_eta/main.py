@@ -38,6 +38,9 @@ def parse_args():
     parser.add_argument('--forecast', action='store_true', help='train to forecast')
     parser.add_argument('--teacher_force', action='store_true', help='teacher forcing. only effective when forecasting')
     parser.add_argument('--random_baseline', action='store_true', help='randomly permute topics as a baseline')
+    parser.add_argument('--use_proto_loss', action='store_true', help='use prototypical loss')
+    parser.add_argument('--update_rate', type=float, default=0.5, \
+        help='update rate for updating prototypes across time. prototypes <- update_rate * new_prototypes + (1 - update_rate) * prototypes')
 
     # model configs
     parser.add_argument('--seed', type=int, default=2020, help='random seed (default: 1)')
@@ -78,12 +81,16 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
 
         self.rnn = nn.LSTM(lstm_input_size, hidden_size=self.configs['hidden_size'], bidirectional=self.configs['bi_lstm'], \
             dropout=self.configs['dropout'], num_layers=self.configs['num_layers'], batch_first=True)
-        rnn_out_size = self.configs['hidden_size'] if not self.configs['bi_lstm'] else self.configs['hidden_size'] * 2
+        self.rnn_out_size = self.configs['hidden_size'] if not self.configs['bi_lstm'] else self.configs['hidden_size'] * 2
 
         if self.configs['one_npi_per_model']:
-            self.output = nn.Linear(rnn_out_size, 1, bias=True)
+            self.output = nn.Linear(self.rnn_out_size, 1, bias=True)
         else:
-            self.output = nn.Linear(rnn_out_size, self.configs['num_cnpis'], bias=True)
+            self.output = nn.Linear(self.rnn_out_size, \
+                self.rnn_out_size if self.configs['use_proto_loss'] else self.configs['num_cnpis'], bias=True)
+
+        if self.configs['use_proto_loss']:
+            self.prototypes = torch.zeros(self.configs['num_cnpis'], self.rnn_out_size)
 
     def forward(self, batch_eta, batch_label=None, rnn_hidden_state=None, rnn_cell_state=None):
         if self.configs['embed_topic'] or self.configs['embed_topic_with_alpha']:
@@ -116,9 +123,15 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
+
+        # proto loss requires batch_mask of different size for prediction
+        batch_pred_mask = batch_mask if not self.configs['use_proto_loss'] else \
+            batch_mask[:, :, 0].unsqueeze(-1).expand(-1, -1, self.rnn_out_size)
+
         if not self.configs['forecast']:
             batch_predictions = self(batch_eta)
-            return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+            # return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+            return self.get_loss(batch_labels * batch_mask, batch_predictions * batch_pred_mask)
         else:
             if not self.configs['teacher_force']:
                 batch_predictions = self(batch_eta)
@@ -127,7 +140,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
                 rnn_hidden_state = rnn_cell_state = \
                     torch.zeros((self.configs['num_layers'], batch_eta.shape[0], self.configs['hidden_size'])).to(self.device)
                 # batch_predictions holds all predictions
-                batch_predictions = torch.zeros((batch_eta.shape[0], batch_eta.shape[1], batch_labels.shape[-1])).to(self.device)
+                batch_predictions = torch.zeros((batch_eta.shape[0], batch_eta.shape[1], \
+                    batch_labels.shape[-1] if not self.configs['use_proto_loss'] else batch_eta.shape[1])).to(self.device)
                 for time_idx in range(batch_eta.shape[1]):
                     if batch_mask[:, time_idx, :].sum() == 0:   # end of training time points
                         break
@@ -137,7 +151,9 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
                     batch_predictions[:, time_idx, :] = current_batch_predictions.squeeze()
             batch_labels = batch_labels[:, 1: , :]
             batch_mask = batch_mask[:, 1:, :]
-            return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+            batch_pred_mask = batch_pred_mask[:, 1:, :]
+            # return F.binary_cross_entropy_with_logits(batch_predictions * batch_mask, batch_labels * batch_mask)
+            return self.get_loss(batch_labels * batch_mask, batch_predictions * batch_pred_mask)
 
     def compute_top_k_recall_prec(self, labels, predictions, k=5, metric='recall'):
         '''
@@ -169,7 +185,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             rnn_hidden_state = rnn_cell_state = \
                 torch.zeros((self.configs['num_layers'], batch_eta.shape[0], self.configs['hidden_size'])).to(self.device)
             # batch_predictions holds all predictions
-            batch_predictions = torch.zeros((batch_eta.shape[0], batch_eta.shape[1], batch_labels.shape[-1])).to(self.device)
+            batch_predictions = torch.zeros((batch_eta.shape[0], batch_eta.shape[1], \
+                batch_labels.shape[-1] if not self.configs['use_proto_loss'] else batch_eta.shape[1])).to(self.device)
             for time_idx in range(batch_eta.shape[1]):
                 if batch_mask[:, time_idx, :].sum() > 0:   # in training time points
                     current_batch_predictions, rnn_hidden_state, rnn_cell_state = \
@@ -182,19 +199,29 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
                             rnn_hidden_state, rnn_cell_state)
                 current_batch_predictions = torch.sigmoid(current_batch_predictions).detach()
                 batch_predictions[:, time_idx, :] = current_batch_predictions.squeeze()
-            
+
         return batch_predictions
     
     def validation_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
-        batch_predictions = self.get_batch_predictions_eval(batch_eta, batch_labels, batch_mask)
+
+        # proto loss requires batch_mask of different size for prediction
+        batch_pred_mask = batch_mask if not self.configs['use_proto_loss'] else \
+            batch_mask[:, :, 0].unsqueeze(-1).expand(-1, -1, self.rnn_out_size)
+
+        batch_predictions_raw = self.get_batch_predictions_eval(batch_eta, batch_labels, batch_mask)
+
+        batch_predictions = self.predict_proba(batch_predictions_raw) if self.configs['use_proto_loss'] \
+            else batch_predictions_raw
+
         if self.configs['forecast']:
             batch_labels = batch_labels[:, 1: , :]
             batch_mask = batch_mask[:, 1:, :]
         batch_predictions_masked = batch_predictions * (1 - batch_mask)
         batch_labels_masked = batch_labels * (1 - batch_mask)
 
-        val_loss = F.binary_cross_entropy_with_logits(batch_predictions_masked, batch_labels_masked)
+        # val_loss = F.binary_cross_entropy_with_logits(batch_predictions_masked, batch_labels_masked)
+        val_loss = self.get_loss(batch_labels_masked, batch_predictions_raw * (1 - batch_pred_mask))
 
         self.log_dict({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
         self.logger.experiment.log({'val_loss': val_loss, 'epoch': self.current_epoch, 'step': self.global_step})
@@ -263,6 +290,9 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         assert breakdown_by in ['measure', 'source'], 'can only breankdown by measure or source'
 
         batch_predictions = self.get_batch_predictions_eval(batch_eta, batch_labels, batch_mask)
+        if self.configs['use_proto_loss']:
+            batch_predictions = self.predict_proba(batch_predictions)
+
         if self.configs['forecast']:
             batch_labels = batch_labels[:, 1: , :]
             batch_mask = batch_mask[:, 1:, :]
@@ -323,6 +353,87 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
 
         return cnpi_auprcs_breakdown_out, cnpi_auprcs_breakdown_source_out
 
+    def get_loss(self, labels, pred):
+        if not self.configs["use_proto_loss"]:
+            return F.binary_cross_entropy_with_logits(pred, labels)
+        else:
+            return self.__proto_loss(labels.reshape(-1, labels.shape[-1]), pred.reshape(-1, pred.shape[-1]))
+    
+    # below are prototypical loss functions
+    def predict_proba(self, pred):
+        # pred is of shape (batch size, time points, hidden size), needs to reshape to 2-d then reshape back
+
+        dists = torch.sigmoid(-self.__euclidean_dist(pred.reshape(-1, pred.shape[-1]), self.prototypes.to(self.device)))
+        return dists.reshape(pred.shape[0], pred.shape[1], -1)
+
+    def __get_prototypes(self, batch_emb, batch_cnpis):
+        prototypes = []
+        non_zero_indices = torch.nonzero(batch_cnpis, as_tuple=False)
+        for cnpi_idx in range(batch_cnpis.shape[-1]):
+            current_non_zero_indices = non_zero_indices[non_zero_indices[:, 1] == cnpi_idx][:, 0]
+            if current_non_zero_indices.nelement() == 0:
+                prototypes.append(self.prototypes[cnpi_idx].detach().to(self.device))
+            else:
+                prototypes.append(batch_emb[current_non_zero_indices].mean(dim=0))
+
+        prototypes = (1 - self.configs['update_rate']) * self.prototypes.detach().to(self.device) \
+            + self.configs['update_rate'] * torch.stack(prototypes, dim=0)
+                
+        return prototypes
+    
+    def __euclidean_dist(self, x, y):
+        '''
+        Compute euclidean distance between two tensors
+        '''
+        # x: N x D
+        # y: M x D
+        n = x.size(0)
+        m = y.size(0)
+        d = x.size(1)
+        if d != y.size(1):
+            raise Exception(f"shape mismatch: {x.shape}, {y.shape}")
+
+        x = x.unsqueeze(1).expand(n, m, d)
+        y = y.unsqueeze(0).expand(n, m, d)
+
+        return torch.pow(x - y, 2).sum(2)
+    
+    def __proto_loss(self, batch_cnpis, batch_emb):
+        # batch_cnpis: (number of samples, number of cnpis)
+        # batch_emb: (number of samples, hidden size)
+
+        has_pos_labels = batch_cnpis.sum(1) != 0
+        batch_cnpis = batch_cnpis[has_pos_labels]
+        batch_emb = batch_emb[has_pos_labels]
+
+        if batch_emb.nelement() == 0:
+            return 0
+        
+        if self.training:
+            prototypes = self.__get_prototypes(batch_emb, batch_cnpis)
+        else:
+            prototypes = self.prototypes.detach()
+            
+        non_zero_indices = torch.nonzero(batch_cnpis, as_tuple=False)
+        # DO NOT use torch.cdist to compute distance, it would cause nan in gradient
+        dists = self.__euclidean_dist(batch_emb, prototypes.to(self.device))
+
+        # log_denominators = torch.logsumexp(-dists, dim=1)
+        probas = 2 * torch.sigmoid(-dists)  # multiply by 2 because -dist is non-positive
+        log_denominators = torch.log(torch.sum(probas, dim=1))
+
+        # query_size = log_denominators.shape[0]
+        query_size = probas.shape[0]
+        neg_log_likelihood = 0
+        for query_idx in range(query_size):
+            # log_numerator = torch.logsumexp(-dists[[query_idx, non_zero_indices[non_zero_indices[:, 0] == query_idx][:, 1]]], dim=0)
+            log_numerator = torch.log(torch.sum(probas[[query_idx, non_zero_indices[non_zero_indices[:, 0] == query_idx][:, 1]]], dim=0))
+            neg_log_likelihood -= (log_numerator - log_denominators[query_idx])
+                
+        self.prototypes = prototypes.detach().to(self.device)
+                
+        return neg_log_likelihood / query_size
+
 if __name__ == '__main__':
     args = parse_args()
     args.bi_lstm = not args.no_bi_lstm
@@ -343,6 +454,9 @@ if __name__ == '__main__':
 
     assert not (configs['bi_lstm'] and configs['teacher_force']), \
         "cannot use bi-LSTM when teacher forcing"
+
+    if configs['one_npi_per_model'] and configs['use_proto_loss']:
+        raise NotImplementedError()
 
     time_stamp = time.strftime("%m-%d-%H-%M", time.localtime())
     print(f"Experiment time stamp: {time_stamp}")
@@ -412,6 +526,8 @@ if __name__ == '__main__':
             tags.append('Teacher forcing')
         if configs['random_baseline']:
             tags.append('Random baseline')
+        if configs['use_proto_loss']:
+            tags.append('Prototypical loss')
         wb_logger = pl_loggers.WandbLogger(
             name=f"{time_stamp}",
             project="covid",
@@ -436,6 +552,8 @@ if __name__ == '__main__':
                 test_predictions = model.get_batch_predictions_eval(
                     data.to(model.device), labels.to(model.device), mask.to(model.device)
                 )
+                if model.configs['use_proto_loss']:
+                    test_predictions = model.predict_proba(test_predictions)
             # should be only 1 batch
             torch.save(test_predictions, os.path.join(configs['save_path'], time_stamp, 'test_predictions.pt'))
     else:
@@ -490,6 +608,8 @@ if __name__ == '__main__':
                     test_predictions = model.get_batch_predictions_eval(
                         data.to(model.device), labels.to(model.device), mask.to(model.device)
                     )
+                    if model.configs['use_proto_loss']:
+                        test_predictions = model.predict_proba(test_predictions)
                 # should be only 1 batch
                 torch.save(test_predictions, \
                     os.path.join(configs['save_path'], time_stamp, f"{current_cnpi}", 'test_predictions.pt'))
