@@ -197,19 +197,22 @@ def get_batch(tokens, counts, ind, sources, labels, vocab_size, emsize=300, temp
         #         data_batch[i, word] = count[j]
     
     for batch_idx, doc_idx in enumerate(ind):
-        data_batch[batch_idx, tokens[doc_idx]] = counts[doc_idx]
+        try:
+            data_batch[batch_idx, tokens[doc_idx]] = counts[doc_idx]
+        except:
+            raise Exception(tokens[doc_idx])
 
     sources_batch = sources[ind]
     labels_batch = labels[ind]
     if temporal:
         times_batch = times[ind]
     
-    data_batch = torch.from_numpy(data_batch).float().to(device)
-    sources_batch = torch.from_numpy(sources_batch).to(device)
-    labels_batch = torch.from_numpy(labels_batch).to(device)
+    data_batch = torch.from_numpy(data_batch).float()
+    sources_batch = torch.from_numpy(sources_batch)
+    labels_batch = torch.from_numpy(labels_batch)
 
     if temporal:
-        times_batch = torch.from_numpy(times_batch).to(device)
+        times_batch = torch.from_numpy(times_batch)
         return data_batch, times_batch, sources_batch, labels_batch
 
     return data_batch, sources_batch, labels_batch
@@ -221,9 +224,9 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
     indices = torch.randperm(num_docs)
     indices = torch.split(indices, 1000)
     
-    rnn_input = torch.zeros(num_sources, num_times, vocab_size).to(device)
+    rnn_input = torch.zeros(num_sources, num_times, vocab_size)
 
-    cnt = torch.zeros(num_sources, num_times, vocab_size).to(device)
+    cnt = torch.zeros(num_sources, num_times, vocab_size)
 
     for idx, ind in enumerate(indices):
         

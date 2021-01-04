@@ -243,7 +243,7 @@ else:
 train_rnn_inp = data.get_rnn_input(
     train_tokens, train_counts, train_times, train_sources, train_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_train)
+    args.vocab_size, args.num_docs_train).to(device)
 
 
 # 2. dev set
@@ -263,7 +263,7 @@ args.num_docs_valid = len(valid_tokens)
 valid_rnn_inp = data.get_rnn_input(
     valid_tokens, valid_counts, valid_times, valid_sources, valid_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_valid)
+    args.vocab_size, args.num_docs_valid).to(device)
 
 # 3. test data
 print('Getting testing data ...')
@@ -282,7 +282,7 @@ args.num_docs_test = len(test_tokens)
 test_rnn_inp = data.get_rnn_input(
     test_tokens, test_counts, test_times, test_sources, test_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_test)
+    args.vocab_size, args.num_docs_test).to(device)
 
 
 test_1_tokens = test['tokens_1']
@@ -292,7 +292,7 @@ args.num_docs_test_1 = len(test_1_tokens)
 test_1_rnn_inp = data.get_rnn_input(
     test_1_tokens, test_1_counts, test_1_times, test_sources, test_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_test)
+    args.vocab_size, args.num_docs_test).to(device)
 
 
 test_2_tokens = test['tokens_2']
@@ -302,7 +302,7 @@ args.num_docs_test_2 = len(test_2_tokens)
 test_2_rnn_inp = data.get_rnn_input(
     test_2_tokens, test_2_counts, test_2_times, test_sources, test_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_test)
+    args.vocab_size, args.num_docs_test).to(device)
 
 # get cnpi related data
 if args.predict_cnpi:
@@ -409,6 +409,11 @@ else:
     print('Defaulting to vanilla SGD')
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
+def to_device(*args):
+    out = []
+    for arg in args:
+        out.append(arg.to(device))
+    return out
 
 def train(epoch):
     """
@@ -436,6 +441,9 @@ def train(epoch):
         data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
             train_tokens, train_counts, ind, train_sources, train_labels, 
             args.vocab_size, args.emb_size, temporal=True, times=train_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)        
+
+        data_batch, times_batch, sources_batch, labels_batch = \
+            to_device(data_batch, times_batch, sources_batch, labels_batch)
 
         sums = data_batch.sum(1).unsqueeze(1)
 
@@ -642,6 +650,9 @@ def get_theta_for_source(source):
                 tokens, counts, ind, sources, labels, 
                 args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
 
+            data_batch, times_batch, sources_batch, labels_batch = \
+                to_device(data_batch, times_batch, sources_batch, labels_batch)
+
             sums = data_batch.sum(1).unsqueeze(1)
 
             if args.bow_norm:
@@ -681,6 +692,9 @@ def get_completion_ppl(source):
                 data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
                     tokens, counts, ind, sources, labels, 
                     args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+                data_batch, times_batch, sources_batch, labels_batch = \
+                    to_device(data_batch, times_batch, sources_batch, labels_batch)
 
                 sums = data_batch.sum(1).unsqueeze(1)
 
@@ -740,6 +754,9 @@ def get_completion_ppl(source):
                     tokens_1, counts_1, ind, test_sources, test_labels,
                     args.vocab_size, args.emb_size, temporal=True, times=test_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
                 
+                data_batch_1, times_batch_1, sources_batch_1, labels_batch_1 = \
+                    to_device(data_batch_1, times_batch_1, sources_batch_1, labels_batch_1)
+
                 sums_1 = data_batch_1.sum(1).unsqueeze(1)
 
                 if args.bow_norm:
@@ -752,6 +769,9 @@ def get_completion_ppl(source):
                 data_batch_2, times_batch_2, sources_batch_2, labels_batch_2 = data.get_batch(
                     tokens_2, counts_2, ind, test_sources, test_labels,
                     args.vocab_size, args.emb_size, temporal=True, times=test_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+                data_batch_2, times_batch_2, sources_batch_2, labels_batch_2 = \
+                    to_device(data_batch_2, times_batch_2, sources_batch_2, labels_batch_2)
 
                 sums_2 = data_batch_2.sum(1).unsqueeze(1)
                 
@@ -1017,6 +1037,9 @@ def get_doc_labels_metrics(mode, return_vals=['recall', 'precision', 'f1']):
             data_batch, times_batch, sources_batch, labels_batch = data.get_batch(
                 tokens, counts, ind, sources, labels, 
                 args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+            data_batch, times_batch, sources_batch, labels_batch = \
+                to_device(data_batch, times_batch, sources_batch, labels_batch)
 
             sums = data_batch.sum(1).unsqueeze(1)
 
