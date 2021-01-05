@@ -111,7 +111,7 @@ parser.add_argument('--lr_factor', type=float, default=4.0, help='divide learnin
 
 parser.add_argument('--epochs', type=int, default=150, help='number of epochs to train')
 
-parser.add_argument('--mode', type=str, default='train', help='train or eval model')
+parser.add_argument('--mode', type=str, default='train', choices=["train", "eval", "eval_transfer"], help='train or eval model')
 # parser.add_argument('--mode', type=str, default='eval_model', help='train or eval model')
 
 parser.add_argument('--optimizer', type=str, default='adam', help='choice of optimizer')
@@ -382,7 +382,7 @@ if not os.path.exists(ckpt):
     os.makedirs(ckpt)
 
 ## define model and optimizer
-if args.load_from != '':
+if args.load_from != '' and args.mode == 'train':
     print('Loading checkpoint from {}'.format(args.load_from))
     with open(os.path.join(ckpt, 'model.pt'), 'rb') as f:
         model = torch.load(f)
@@ -1339,7 +1339,7 @@ if args.mode == 'train':
         f.write(s1)
         f.close()
 else: 
-    with open(os.path.join(ckpt, 'model.pt'), 'rb') as f:
+    with open(os.path.join(args.load_from, 'model.pt'), 'rb') as f:
         model = torch.load(f)
     model = model.to(device)
 
