@@ -571,14 +571,14 @@ def visualize():
 
 def _eta_helper(rnn_inp):
 
-    etas = torch.zeros(model.num_sources, model.num_times, model.num_topics).to(device)
+    etas = torch.zeros(args.num_sources, args.num_times, args.num_topics).to(device)
     inp = model.q_eta_map(rnn_inp.view(rnn_inp.size(0)*rnn_inp.size(1), -1)).view(rnn_inp.size(0),rnn_inp.size(1),-1)
     hidden = model.init_hidden()
     output, _ = model.q_eta(inp, hidden)
-    inp_0 = torch.cat([output[:,0,:], torch.zeros(model.num_sources, model.num_topics).to(device)], dim=1)
+    inp_0 = torch.cat([output[:,0,:], torch.zeros(args.num_sources, args.num_topics).to(device)], dim=1)
     etas[:, 0, :] = model.mu_q_eta(inp_0)
 
-    for t in range(1, model.num_times):
+    for t in range(1, args.num_times):
         inp_t = torch.cat([output[:,t,:], etas[:, t-1, :]], dim=1)
         etas[:, t, :] = model.mu_q_eta(inp_t)
     
@@ -1237,8 +1237,8 @@ if args.mode == 'train':
     for epoch in range(1, args.epochs):
         train(epoch)
         
-        if epoch % args.visualize_every == 0:
-            visualize()
+        # if epoch % args.visualize_every == 0:
+            # visualize()
         
         # print(model.classifier.weight)
 
@@ -1372,6 +1372,10 @@ if args.predict_cnpi:
 if args.mode == 'train':
     with open(os.path.join(ckpt, 'config.json'), 'w') as file:
         json.dump(config_dict, file)
+
+print('saving training eta ...')
+eta = get_eta('train').cpu().detach().numpy()
+np.save(os.path.join(ckpt, 'eta.npy'), eta, allow_pickle=False)
 
 print('saving evaluation eta ...')
 eta = get_eta('val').cpu().detach().numpy()
