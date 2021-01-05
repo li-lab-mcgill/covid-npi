@@ -719,7 +719,8 @@ def get_features(init_timestamps, init_docs, stops, min_df=min_df, max_df=max_df
     # Create mapping of timestamps
     #print(init_timestamps)
     #exit()
-    all_times = sorted(set(init_timestamps), key=lambda str_timestamp: datetime.strptime(str_timestamp, "%Y-%m"))
+    all_times = sorted(set(init_timestamps), \
+        key=lambda str_time: [int(num) for num in str_time.split('-')])
     #print(len(set(init_timestamps)))
     #exit()
     time2id = dict([(t, i) for i, t in enumerate(all_times)])
@@ -1150,29 +1151,30 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     q_theta_data, cnpi_data, dataset):
 
     # Write the vocabulary to a file
-    path_save = save_dir + 'min_df_' + str(min_df) + '/'
+    path_save = os.path.join(save_dir, f"min_df_{min_df}")
+    # path_save = save_dir + 'min_df_' + str(min_df) + '/'
     if not os.path.isdir(path_save):
-        os.system('mkdir -p ' + path_save)
+        os.makedirs(path_save)
 
-    pickle_save(path_save + 'vocab.pkl', vocab)
+    pickle_save(os.path.join(path_save, 'vocab.pkl'), vocab)
     del vocab
 
     # with open(path_save+"vocab_map.txt","w") as f:
     #     for i,w in id2word.items():
     #         f.write(str(i)+" : " + str(w)+"\n")
     #     f.close()
-    pickle_save(path_save+"vocab_map.pkl", id2word)
+    pickle_save(os.path.join(path_save, "vocab_map.pkl"), id2word)
  
     # with open(path_save + 'timestamps.txt', "w") as f:
     #     for t in time_list:
     #         f.write(str(t) + '\n')
 
-    pickle_save(path_save + 'timestamps.pkl', time_list)
+    pickle_save(os.path.join(path_save, 'timestamps.pkl'), time_list)
     
-    with open(path_save+"times_map.pkl","wb") as f:
+    with open(os.path.join(path_save, "times_map.pkl"), "wb") as f:
         pkl.dump(id2time, f)
 
-    with open(path_save+"times_map.txt","w") as f:
+    with open(os.path.join(path_save, "times_map.txt"), "w") as f:
         for i,v in id2time.items():
             f.write(str(i)+" : " + str(v) +"\n")
         # f.close()
@@ -1231,9 +1233,9 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     
     # all countries
     if not full_data:
-        pkl.dump(countries_to_idx, open(path_save + 'sources_map.pkl',"wb"))
+        pkl.dump(countries_to_idx, open(os.path.join(path_save, 'sources_map.pkl'), "wb"))
 
-    with open(path_save+"sources_map.txt","w") as f:
+    with open(os.path.join(path_save, "sources_map.txt"), "w") as f:
         for i,v in countries_to_idx.items():
             f.write(str(i)+" : " + str(v)+"\n")
         del countries_to_idx
@@ -1248,12 +1250,12 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
    
 
     if not full_data:
-        pkl.dump(countries_tr, open(path_save + 'bow_tr_sources.pkl',"wb"))
+        pkl.dump(countries_tr, open(os.path.join(path_save, 'bow_tr_sources.pkl'),"wb"))
         pickle_save(os.path.join(path_save, 'bow_tr_timestamps.pkl'), np.array(timestamps_tr))
-    pkl.dump(ids_tr, open(path_save + 'bow_tr_ids.pkl',"wb"))
+    pkl.dump(ids_tr, open(os.path.join(path_save, 'bow_tr_ids.pkl'), "wb"))
     #savemat(path_save+"bow_tr_labels.mat",{'labels':labels_tr},do_compression=True)
     if dataset is not 'aylien':
-        pickle.dump(labels_tr, open(path_save+"bow_tr_labels.pkl","wb"))
+        pickle.dump(labels_tr, open(os.path.join(path_save, "bow_tr_labels.pkl"),"wb"))
 
     del bow_tr
     del bow_tr_tokens
@@ -1264,12 +1266,12 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     pickle_save(os.path.join(path_save, 'bow_ts_counts.pkl'), np.array(bow_ts_counts))
     #savemat(path_save + 'bow_ts_countries.mat', {'countries': countries_ts}, do_compression=True)
     if not full_data:
-        pkl.dump(countries_ts, open(path_save + 'bow_ts_sources.pkl',"wb"))
+        pkl.dump(countries_ts, open(os.path.join(path_save, 'bow_ts_sources.pkl'), "wb"))
         pickle_save(os.path.join(path_save, 'bow_ts_timestamps.pkl'), np.array(timestamps_ts))
-    pkl.dump(ids_ts, open(path_save + 'bow_ts_ids.pkl',"wb"))
+    pkl.dump(ids_ts, open(os.path.join(path_save, 'bow_ts_ids.pkl'), "wb"))
     #savemat(path_save+"bow_ts_labels.mat",{'labels':labels_ts},do_compression=True)
     if dataset is not 'aylien':
-        pickle.dump(labels_ts, open(path_save+"bow_ts_labels.pkl","wb"))
+        pickle.dump(labels_ts, open(os.path.join(path_save, "bow_ts_labels.pkl"), "wb"))
 
     del bow_ts
     del bow_ts_tokens
@@ -1281,11 +1283,11 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     pickle_save(os.path.join(path_save, 'bow_ts_h1_counts.pkl'), np.array(bow_ts_h1_counts))
     #savemat(path_save + 'bow_ts_h1_countries.mat', {'countries': countries_ts_h1}, do_compression=True)
     if not full_data:
-        pkl.dump(countries_ts_h1, open(path_save + 'bow_ts_h1_sources.pkl',"wb"))
+        pkl.dump(countries_ts_h1, open(os.path.join(path_save, 'bow_ts_h1_sources.pkl'), "wb"))
         pickle_save(os.path.join(path_save, 'bow_va_timestamps.pkl'), np.array(timestamps_va))
     #savemat(path_save+"bow_ts_h1_labels.mat",{'labels':labels_ts_h1},do_compression=True)
     if dataset is not 'aylien':
-        pickle.dump(labels_ts_h1, open(path_save+"bow_ts_h1_labels.pkl","wb"))
+        pickle.dump(labels_ts_h1, open(os.path.join(path_save, "bow_ts_h1_labels.pkl"), "wb"))
 
     del bow_ts_h1
     del bow_ts_h1_tokens
@@ -1296,10 +1298,10 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     pickle_save(os.path.join(path_save, 'bow_ts_h2_counts.pkl'), np.array(bow_ts_h2_counts))
     #savemat(path_save + 'bow_ts_h2_countries.mat', {'countries': countries_ts_h2}, do_compression=True)
     if not full_data:
-        pickle.dump(countries_ts_h2, open(path_save + 'bow_ts_h2_sources.pkl',"wb"))
-        pickle.dump(timestamps_ts_h2, open(path_save + 'bow_ts_h2_timestamps.pkl',"wb"))
+        pickle.dump(countries_ts_h2, open(os.path.join(path_save, 'bow_ts_h2_sources.pkl'), "wb"))
+        pickle.dump(timestamps_ts_h2, open(os.path.join(path_save, 'bow_ts_h2_timestamps.pkl'), "wb"))
     if dataset is not 'aylien':
-        pickle.dump(labels_ts_h2, open(path_save+"bow_ts_h2_labels.pkl","wb"))
+        pickle.dump(labels_ts_h2, open(os.path.join(path_save, "bow_ts_h2_labels.pkl"), "wb"))
     #savemat(path_save+"bow_ts_h2_labels.mat",{'labels':labels_ts_h2},do_compression=True)
 
     del bow_ts_h2
@@ -1312,19 +1314,19 @@ def save_data(save_dir, vocab, bow_tr, n_docs_tr, bow_ts, n_docs_ts, bow_ts_h1, 
     pickle_save(os.path.join(path_save, 'bow_va_counts.pkl'), np.array(bow_va_counts))
     #savemat(path_save + 'bow_va_countries.mat', {'countries': countries_va}, do_compression=True)
     if not full_data:
-        pickle.dump(countries_va, open(path_save + 'bow_va_sources.pkl',"wb"))
-        pickle.dump(timestamps_va, open(path_save + 'bow_va_timestamps.pkl',"wb"))
-    pickle.dump(ids_va, open(path_save + 'bow_va_ids.pkl','wb'))
+        pickle.dump(countries_va, open(os.path.join(path_save, 'bow_va_sources.pkl'), "wb"))
+        pickle.dump(timestamps_va, open(os.path.join(path_save, 'bow_va_timestamps.pkl'), "wb"))
+    pickle.dump(ids_va, open(os.path.join(path_save, 'bow_va_ids.pkl'), 'wb'))
     if dataset is not 'aylien':
-        pickle.dump(labels_va, open(path_save+"bow_va_labels.pkl","wb"))
+        pickle.dump(labels_va, open(os.path.join(path_save, "bow_va_labels.pkl"), "wb"))
     #savemat(path_save+"bow_va_labels.mat",{'labels':labels_va},do_compression=True)
 
     del bow_va
     del bow_va_tokens
     del bow_va_counts
 
-    pickle.dump(label_map, open(path_save+"labels_map.pkl","wb"))
-    f = open(path_save+"labels_map.txt","w")
+    pickle.dump(label_map, open(os.path.join(path_save, "labels_map.pkl"), "wb"))
+    f = open(os.path.join(path_save, "labels_map.txt"), "w")
     for i,v in label_map.items():
         f.write(str(i)+" : " + str(v) +"\n")
     f.close()
