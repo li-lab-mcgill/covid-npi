@@ -48,36 +48,6 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
             data = pickle.load(file)
         return [np.array(arr) for arr in data]
 
-    def fetch(self, name):
-        if name == 'train':
-            token_file = os.path.join(self.path, 'bow_tr_tokens.pkl')
-            count_file = os.path.join(self.path, 'bow_tr_counts.pkl')
-            time_file = os.path.join(self.path, 'bow_tr_timestamps.pkl')
-            source_file = os.path.join(self.path, 'bow_tr_sources.pkl')
-        elif name == 'valid':
-            token_file = os.path.join(self.path, 'bow_va_tokens.pkl')
-            count_file = os.path.join(self.path, 'bow_va_counts.pkl')
-            time_file = os.path.join(self.path, 'bow_va_timestamps.pkl')
-            source_file = os.path.join(self.path, 'bow_va_sources.pkl')
-        else:
-            token_file = os.path.join(self.path, 'bow_ts_tokens.pkl')
-            count_file = os.path.join(self.path, 'bow_ts_counts.pkl')
-            time_file = os.path.join(self.path, 'bow_ts_timestamps.pkl')
-            source_file = os.path.join(self.path, 'bow_ts_sources.pkl') 
-        
-        with open(token_file, 'rb') as file:
-            tokens = pickle.load(file)
-        with open(count_file, 'rb') as file:
-            counts = pickle.load(file)
-        
-        with open(time_file, 'rb') as file:
-            times = pickle.load(file)
-
-        with open(source_file, 'rb') as file:
-            sources = pickle.load(file)
-
-        return {'tokens': tokens, 'counts': counts, 'times': times, 'sources': sources}
-
     def prepare_data(self):
         # load eta
         eta = torch.from_numpy(np.load(os.path.join(self.configs['eta_path'], 'eta.npy')))
