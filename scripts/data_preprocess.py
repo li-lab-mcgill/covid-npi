@@ -719,7 +719,7 @@ def get_features(init_timestamps, init_docs, stops, min_df=min_df, max_df=max_df
     # Create mapping of timestamps
     #print(init_timestamps)
     #exit()
-    all_times = sorted(set(init_timestamps))
+    all_times = sorted(set(init_timestamps), key=lambda str_timestamp: datetime.strptime(str_timestamp, "%Y-%m"))
     #print(len(set(init_timestamps)))
     #exit()
     time2id = dict([(t, i) for i, t in enumerate(all_times)])
