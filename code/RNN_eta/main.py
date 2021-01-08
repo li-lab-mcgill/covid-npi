@@ -124,8 +124,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
 
-        # clamp mask into no larger than 1
-        batch_mask = torch.clamp(batch_mask, max=1)
+        # change cells where values are 2 to 0
+        batch_mask[batch_mask == 2] = 0
 
         # proto loss requires batch_mask of different size for prediction
         batch_pred_mask = batch_mask if not self.configs['use_proto_loss'] else \
