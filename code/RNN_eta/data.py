@@ -23,8 +23,10 @@ class COVID_Eta_Dataset(Dataset):
     def __len__(self):
         return self.eta.shape[0]
 
-    def __prefix_shift(self, data, first_pos_label_time_idx, valid_length):
-        shift_data = torch.zeros_like(data)
+    def __prefix_shift(self, data, first_pos_label_time_idx, valid_length, fill_val=0):
+        
+        shift_data = fill_val * torch.ones_like(data) if fill_val != 0 \
+            else torch.zeros_like(data)
         shift_data[:valid_length, :] = data[first_pos_label_time_idx:, :]
         return shift_data
 
@@ -48,7 +50,8 @@ class COVID_Eta_Dataset(Dataset):
         # shift data forward to elimincate empty prefixing time points
         shift_labels = self.__prefix_shift(labels, first_pos_label_time_idx, valid_length)
         shift_eta = self.__prefix_shift(batch_eta, first_pos_label_time_idx, valid_length)
-        shift_mask = self.__prefix_shift(mask, first_pos_label_time_idx, valid_length)
+        # for mask, fill with 2 to mark unused time points
+        shift_mask = self.__prefix_shift(mask, first_pos_label_time_idx, valid_length, fill_val=2)
         
         return shift_eta, shift_labels, shift_mask
 

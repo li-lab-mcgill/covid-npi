@@ -124,6 +124,9 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         batch_eta, batch_labels, batch_mask = batch
 
+        # clamp mask into no larger than 1
+        batch_mask = torch.clamp(batch_mask, max=1)
+
         # proto loss requires batch_mask of different size for prediction
         batch_pred_mask = batch_mask if not self.configs['use_proto_loss'] else \
             batch_mask[:, :, 0].unsqueeze(-1).expand(-1, -1, self.rnn_out_size)
@@ -178,6 +181,9 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
             return (torch.gather(labels, 1, idxs).sum(1) / k).mean()
 
     def get_batch_predictions_eval(self, batch_eta, batch_labels, batch_mask):
+        # clamp mask into no larger than 1
+        batch_mask = torch.clamp(batch_mask, max=1)
+
         if not self.configs['teacher_force']:
             batch_predictions = self(batch_eta)
         else:
@@ -217,8 +223,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         if self.configs['forecast']:
             batch_labels = batch_labels[:, 1: , :]
             batch_mask = batch_mask[:, 1:, :]
-        batch_predictions_masked = batch_predictions * (1 - batch_mask)
-        batch_labels_masked = batch_labels * (1 - batch_mask)
+        batch_predictions_masked = batch_predictions * torch.clamp(1 - batch_mask, min=0)
+        batch_labels_masked = batch_labels * torch.clamp(1 - batch_mask, min=0)
 
         # val_loss = F.binary_cross_entropy_with_logits(batch_predictions_masked, batch_labels_masked)
         val_loss = self.get_loss(batch_labels_masked, batch_predictions_raw * (1 - batch_pred_mask))
@@ -296,8 +302,8 @@ class RNN_CNPI_EtaModel(pl.LightningModule):
         if self.configs['forecast']:
             batch_labels = batch_labels[:, 1: , :]
             batch_mask = batch_mask[:, 1:, :]
-        batch_predictions_masked = batch_predictions * (1 - batch_mask)
-        batch_labels_masked = batch_labels * (1 - batch_mask)
+        batch_predictions_masked = batch_predictions * torch.clamp(1 - batch_mask, min=0)
+        batch_labels_masked = batch_labels * torch.clamp(1 - batch_mask, min=0)
 
         if breakdown_by == 'measure':
             return self.compute_auprc_breakdown(batch_labels_masked.reshape(-1, batch_labels_masked.shape[-1]), \
