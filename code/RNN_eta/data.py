@@ -32,8 +32,8 @@ class COVID_Eta_Dataset(Dataset):
         labels = self.cnpis[country_idx]
         
         # the first timepoint with positive label
-        first_pos_label_time_idx = labels.sum(dim=0).nonzero().squeeze().min()
-        valid_length = labels.shape[1] - first_pos_label_time_idx
+        first_pos_label_time_idx = labels.sum(dim=1).nonzero().squeeze().min()
+        valid_length = labels.shape[0] - first_pos_label_time_idx
 
         mask = self.cnpi_mask[country_idx]
         
@@ -86,6 +86,10 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
         cnpi_mask = torch.from_numpy(cnpi_mask).type('torch.LongTensor')
         cnpi_mask = cnpi_mask.unsqueeze(-1).expand(cnpis.size())    # match cnpis' shape to apply masking
 
+        # data shape check
+        assert eta.shape[0] == cnpis.shape[0] == cnpi_mask.shape[0], "first dimension shape mistach"
+        assert eta.shape[1] == cnpis.shape[1] == cnpi_mask.shape[1], "second dimension shape mistach"
+
         if self.configs['one_npi_per_model']:
             cnpis = cnpis[:, :, self.configs['current_cnpi']].unsqueeze(dim=-1)
             cnpi_mask = cnpi_mask[:, :, self.configs['current_cnpi']].unsqueeze(dim=-1)
@@ -100,8 +104,8 @@ class COVID_Eta_Data_Module(pl.LightningDataModule):
 
     def val_dataloader(self):
         # evaluate all countries at once
-        return DataLoader(self.eval_dataset, batch_size=self.num_sources, shuffle=True, num_workers=4)
+        return DataLoader(self.eval_dataset, batch_size=self.num_sources, shuffle=False, num_workers=4)
 
     def test_dataloader(self):
         # evaluate all countries at once
-        return DataLoader(self.test_dataset, batch_size=self.num_sources, shuffle=True, num_workers=4)
+        return DataLoader(self.test_dataset, batch_size=self.num_sources, shuffle=False, num_workers=4)
