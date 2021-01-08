@@ -23,7 +23,20 @@ class COVID_Eta_Dataset(Dataset):
     def __len__(self):
         return self.eta.shape[0]
 
+    def __prefix_shift(self, data, first_pos_label_time_idx, valid_length):
+        shift_data = torch.zeros_like(data)
+        shift_data[:valid_length, :] = data[first_pos_label_time_idx:, :]
+        return shift_data
+
     def __getitem__(self, country_idx):
+        labels = self.cnpis[country_idx]
+        
+        # the first timepoint with positive label
+        first_pos_label_time_idx = labels.sum(dim=0).nonzero().squeeze().min()
+        valid_length = labels.shape[1] - first_pos_label_time_idx
+
+        mask = self.cnpi_mask[country_idx]
+        
         if not self.forecast:
             batch_eta = self.eta[country_idx]
         else:
@@ -32,10 +45,12 @@ class COVID_Eta_Dataset(Dataset):
         if self.random_baseline:
             batch_eta = batch_eta[:, torch.randperm(batch_eta.shape[-1], dtype=torch.long)]
 
-        labels = self.cnpis[country_idx]
-        mask = self.cnpi_mask[country_idx]
+        # shift data forward to elimincate empty prefixing time points
+        shift_labels = self.__prefix_shift(labels, first_pos_label_time_idx, valid_length)
+        shift_eta = self.__prefix_shift(batch_eta, first_pos_label_time_idx, valid_length)
+        shift_mask = self.__prefix_shift(mask, first_pos_label_time_idx, valid_length)
         
-        return batch_eta, labels, mask
+        return shift_eta, shift_labels, shift_mask
 
 class COVID_Eta_Data_Module(pl.LightningDataModule):
     def __init__(self, configs):
