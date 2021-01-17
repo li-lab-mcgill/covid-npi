@@ -99,7 +99,7 @@ def _fetch_temporal(path, name, predict=True, use_time=True, use_source=True, if
     embs, emb_vocab_size = get_embs(path, name, if_one_hot, emb_vocab_size, q_theta_arc)
     
     if use_time:        
-        times = pickle_load(time_file)
+        times = np.array(pickle_load(time_file))
     else:
         times = np.zeros(tokens.shape[0])
 
@@ -157,65 +157,77 @@ def get_batch(tokens, counts, embs, ind, sources, labels, vocab_size, emsize=300
     embs_batch = []
     masks_batch = []
     
-    if temporal:
-        times_batch = np.zeros((batch_size, ))
+    # if temporal:
+    #     times_batch = np.zeros((batch_size, ))
 
-    sources_batch = np.zeros((batch_size, ))
+    # sources_batch = np.zeros((batch_size, ))
 
-    if len(labels.shape) == 2: # multi-clas labels
-        labels_batch = np.zeros((batch_size, labels.shape[1])) 
-    else: # single-class of vector of integer class labels
-        labels_batch = np.zeros((batch_size, ))
+    # if len(labels.shape) == 2: # multi-clas labels
+    #     labels_batch = np.zeros((batch_size, labels.shape[1])) 
+    # else: # single-class of vector of integer class labels
+    #     labels_batch = np.zeros((batch_size, ))
     
     # set_trace()
 
-    for i, doc_id in enumerate(ind):        
+    # the for loop below is the original implementation
+    # for i, doc_id in enumerate(ind):        
         
-        doc = tokens[doc_id]
-        count = counts[doc_id]
+    #     doc = tokens[doc_id]
+    #     count = counts[doc_id]
 
-        source = sources[doc_id]
-        sources_batch[i] = source        
+    #     source = sources[doc_id]
+    #     sources_batch[i] = source        
         
-        label = labels[doc_id]
-        labels_batch[i] = label
+    #     label = labels[doc_id]
+    #     labels_batch[i] = label
 
-        if temporal:
-            timestamp = times[doc_id]
-            times_batch[i] = timestamp
+    #     if temporal:
+    #         timestamp = times[doc_id]
+    #         times_batch[i] = timestamp
         
-        if len(doc) == 1: 
-            doc = [doc.squeeze()]
-            count = [count.squeeze()]
-        else:
-            doc = doc.squeeze()
-            count = count.squeeze()
-        if doc_id != -1:
-            for j, word in enumerate(doc):
-                data_batch[i, word] = count[j]
+    #     if len(doc) == 1: 
+    #         doc = [doc.squeeze()]
+    #         count = [count.squeeze()]
+    #     else:
+    #         doc = doc.squeeze()
+    #         count = count.squeeze()
+    #     if doc_id != -1:
+    #         for j, word in enumerate(doc):
+    #             data_batch[i, word] = count[j]
+
+    for batch_idx, doc_idx in enumerate(ind):
+        try:
+            data_batch[batch_idx, tokens[doc_idx]] = counts[doc_idx]
+        except:
+            raise Exception(tokens[doc_idx])
 
         if get_emb:
             # get embeddings batch, max length of 512
             if if_one_hot:
-                # embs_batch.append(torch.tensor(idxs_to_one_hot(embs[doc_id], emb_vocab_size), dtype=torch.float32))
-                embs_batch.append(torch.tensor(embs[doc_id][: 512], dtype=torch.long))
-                masks_batch.append(torch.ones(len(embs[doc_id][: 512])))
+                embs_batch.append(torch.tensor(embs[doc_idx][: 512], dtype=torch.long))
+                masks_batch.append(torch.ones(len(embs[doc_idx][: 512])))
             else:
-                embs_batch.append(torch.tensor(embs[doc_id][: 512], dtype=torch.float32))
+                embs_batch.append(torch.tensor(embs[doc_idx][: 512], dtype=torch.float32))
+                masks_batch.append(torch.ones(len(embs[doc_idx][: 512])))
+
+        sources_batch = sources[ind]
+        labels_batch = labels[ind]
+        if temporal:
+            times_batch = times[ind]
     
-    data_batch = torch.from_numpy(data_batch).float().to(device)
+    data_batch = torch.from_numpy(data_batch).float()
     if get_emb:
         # embs_batch = torch.tensor(embs_batch).to(device)
-        embs_batch_padded = torch.nn.utils.rnn.pad_sequence(embs_batch, batch_first=True).to(device)
-        att_mask = torch.nn.utils.rnn.pad_sequence(masks_batch, batch_first=True).to(device)
+        embs_batch_padded = torch.nn.utils.rnn.pad_sequence(embs_batch, batch_first=True)
+        att_mask = torch.nn.utils.rnn.pad_sequence(masks_batch, batch_first=True)
     else:
         embs_batch_padded = []
         att_mask = []
-    sources_batch = torch.from_numpy(sources_batch).to(device)
-    labels_batch = torch.from_numpy(labels_batch).to(device)
+    sources_batch = torch.from_numpy(sources_batch)
+    labels_batch = torch.from_numpy(labels_batch)
 
     if temporal:
-        times_batch = torch.from_numpy(times_batch).to(device)
+        times_batch = torch.from_numpy(times_batch)
         return data_batch, embs_batch_padded, att_mask, times_batch, sources_batch, labels_batch
 
     return data_batch, embs_batch_padded, att_mask, sources_batch, labels_batch
@@ -244,7 +256,7 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
                 else:
                     docs = data_batch[mask].squeeze().sum(0)
 
-                rnn_input[src,t] += docs.to(torch.device('cpu'))
+                rnn_input[src,t] += docs
                 cnt[src,t] += len(mask)
 
         if idx % 10 == 0:
@@ -252,7 +264,7 @@ def get_rnn_input(tokens, counts, times, sources, labels, num_times, num_sources
     
     rnn_input = (rnn_input + 1e-16) / (cnt + 1e-16)    
 
-    return rnn_input.to(device)
+    return rnn_input
 
 # get document labels to use as inputs for predicting cnpis
 def get_doc_labels_for_cnpi(labels, sources, times, num_sources, num_times, num_cnpis):
@@ -267,28 +279,3 @@ def get_doc_labels_for_cnpi(labels, sources, times, num_sources, num_times, num_
     
         docs_labels[source_idx, time_idx] += labels[idx]
     return torch.from_numpy(docs_labels).float()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -115,7 +115,7 @@ parser.add_argument('--lr_factor', type=float, default=4.0, help='divide learnin
 
 parser.add_argument('--epochs', type=int, default=150, help='number of epochs to train')
 
-parser.add_argument('--mode', type=str, default='train', help='train or eval model')
+parser.add_argument('--mode', type=str, default='train', choices=["train", "eval", "eval_transfer"], help='train or eval model')
 # parser.add_argument('--mode', type=str, default='eval_model', help='train or eval model')
 
 parser.add_argument('--optimizer', type=str, default='adam', help='choice of optimizer')
@@ -253,7 +253,7 @@ else:
 train_rnn_inp = data.get_rnn_input(
     train_tokens, train_counts, train_times, train_sources, train_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_train)
+    args.vocab_size, args.num_docs_train).to(device)
 
 
 # 2. dev set
@@ -274,7 +274,7 @@ args.num_docs_valid = len(valid_tokens)
 valid_rnn_inp = data.get_rnn_input(
     valid_tokens, valid_counts, valid_times, valid_sources, valid_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_valid)
+    args.vocab_size, args.num_docs_valid).to(device)
 
 # 3. test data
 print('Getting testing data ...')
@@ -294,7 +294,7 @@ args.num_docs_test = len(test_tokens)
 test_rnn_inp = data.get_rnn_input(
     test_tokens, test_counts, test_times, test_sources, test_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_test)
+    args.vocab_size, args.num_docs_test).to(device)
 
 
 test_1_tokens = test['tokens_1']
@@ -305,7 +305,7 @@ args.num_docs_test_1 = len(test_1_tokens)
 test_1_rnn_inp = data.get_rnn_input(
     test_1_tokens, test_1_counts, test_1_times, test_sources, test_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_test)
+    args.vocab_size, args.num_docs_test).to(device)
 
 
 test_2_tokens = test['tokens_2']
@@ -316,7 +316,7 @@ args.num_docs_test_2 = len(test_2_tokens)
 test_2_rnn_inp = data.get_rnn_input(
     test_2_tokens, test_2_counts, test_2_times, test_sources, test_labels,
     args.num_times, args.num_sources, 
-    args.vocab_size, args.num_docs_test)
+    args.vocab_size, args.num_docs_test).to(device)
 
 # get cnpi related data
 if args.predict_cnpi:
@@ -396,7 +396,7 @@ if not os.path.exists(ckpt):
     os.makedirs(ckpt)
 
 ## define model and optimizer
-if args.load_from != '':
+if args.load_from != '' and args.mode == 'train':
     print('Loading checkpoint from {}'.format(args.load_from))
     with open(os.path.join(ckpt, 'model.pt'), 'rb') as f:
         model = torch.load(f)
@@ -423,6 +423,11 @@ else:
     print('Defaulting to vanilla SGD')
     optimizer = optim.SGD(model.parameters(), lr=args.lr)
 
+def to_device(*args):
+    out = []
+    for arg in args:
+        out.append(arg.to(device))
+    return out
 
 def train(epoch):
     """
@@ -450,6 +455,9 @@ def train(epoch):
         data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = data.get_batch(
             train_tokens, train_counts, train_embs, ind, train_sources, train_labels, 
             args.vocab_size, args.emb_size, temporal=True, times=train_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)        
+
+        data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = \
+            to_device(data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch)
 
         sums = data_batch.sum(1).unsqueeze(1)
 
@@ -577,14 +585,14 @@ def visualize():
 
 def _eta_helper(rnn_inp, return_q_eta_out=False):
 
-    etas = torch.zeros(model.num_sources, model.num_times, model.num_topics).to(device)
+    etas = torch.zeros(args.num_sources, args.num_times, args.num_topics).to(device)
     inp = model.q_eta_map(rnn_inp.view(rnn_inp.size(0)*rnn_inp.size(1), -1)).view(rnn_inp.size(0),rnn_inp.size(1),-1)
     hidden = model.init_hidden()
     output, _ = model.q_eta(inp, hidden)
-    inp_0 = torch.cat([output[:,0,:], torch.zeros(model.num_sources, model.num_topics).to(device)], dim=1)
+    inp_0 = torch.cat([output[:,0,:], torch.zeros(args.num_sources, args.num_topics).to(device)], dim=1)
     etas[:, 0, :] = model.mu_q_eta(inp_0)
 
-    for t in range(1, model.num_times):
+    for t in range(1, args.num_times):
         inp_t = torch.cat([output[:,t,:], etas[:, t-1, :]], dim=1)
         etas[:, t, :] = model.mu_q_eta(inp_t)
     
@@ -632,6 +640,50 @@ def get_theta(eta, embs, att_mask, times, sources):
         # print(q_theta)   
         return theta
 
+def get_theta_for_source(source):
+    # get the theta for all docs of the specified source
+    assert source in ["train", "val", "test"]
+
+    data_by_source = {
+        "train": (len(train_indices_order), train_tokens, train_counts, train_times, train_sources, train_labels),
+        "val": (len(valid_indices_order), valid_tokens, valid_counts, valid_times, valid_sources, valid_labels),
+        "test": (len(test_indices_order), test_tokens, test_counts, test_times, test_sources, test_labels),
+    }
+
+    model.eval()
+
+    thetas = []
+
+    with torch.no_grad():
+        alpha = model.mu_q_alpha # KxTxL       
+        indice_length, tokens, counts, times, sources, labels = data_by_source[source]
+
+        indices = torch.tensor(np.arange(indice_length))
+        indices = torch.split(indices, args.eval_batch_size)  
+
+        eta = get_eta(source)
+
+        for idx, ind in enumerate(indices):
+            
+            data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = data.get_batch(
+                tokens, counts, embs, ind, sources, labels, 
+                args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+            data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = \
+                to_device(data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch)
+
+            sums = data_batch.sum(1).unsqueeze(1)
+
+            if args.bow_norm:
+                normalized_data_batch = data_batch / sums
+            else:
+                normalized_data_batch = data_batch
+        
+            theta = get_theta(eta, normalized_data_batch, times_batch, sources_batch)
+            thetas.append(theta)
+
+    return torch.cat(thetas, dim=0)
+
 def get_completion_ppl(source):
     """Returns document completion perplexity.
     """
@@ -660,6 +712,9 @@ def get_completion_ppl(source):
                 data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = data.get_batch(
                     tokens, counts, embs, ind, sources, labels, 
                     args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+                data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = \
+                    to_device(data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch)
 
                 sums = data_batch.sum(1).unsqueeze(1)
 
@@ -720,6 +775,9 @@ def get_completion_ppl(source):
                 data_batch_1, embs_batch_1, att_mask_1, times_batch_1, sources_batch_1, labels_batch_1 = data.get_batch(
                     tokens_1, counts_1, embs_1, ind, test_sources, test_labels,
                     args.vocab_size, args.emb_size, temporal=True, times=test_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+                data_batch_1, embs_batch_1, att_mask_1, times_batch_1, sources_batch_1, labels_batch_1 = \
+                    to_device(data_batch_1, embs_batch_1, att_mask_1, times_batch_1, sources_batch_1, labels_batch_1)
                 
                 sums_1 = data_batch_1.sum(1).unsqueeze(1)
 
@@ -733,6 +791,9 @@ def get_completion_ppl(source):
                 data_batch_2, embs_batch_2, att_mask_2, times_batch_2, sources_batch_2, labels_batch_2 = data.get_batch(
                     tokens_2, counts_2, embs_2, ind, test_sources, test_labels,
                     args.vocab_size, args.emb_size, temporal=True, times=test_times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
+
+                data_batch_2, embs_batch_2, att_mask_2, times_batch_2, sources_batch_2, labels_batch_2 = \
+                    to_device(data_batch_2, embs_batch_2, att_mask_2, times_batch_2, sources_batch_2, labels_batch_2)
 
                 sums_2 = data_batch_2.sum(1).unsqueeze(1)
                 
@@ -1005,6 +1066,9 @@ def get_doc_labels_metrics(mode, return_vals=['recall', 'precision', 'f1']):
                 tokens, counts, embs, ind, sources, labels, 
                 args.vocab_size, args.emb_size, temporal=True, times=times, if_one_hot=args.one_hot_qtheta_emb, emb_vocab_size=q_theta_input_dim)
 
+            data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch = \
+                to_device(data_batch, embs_batch, att_mask, times_batch, sources_batch, labels_batch)
+
             sums = data_batch.sum(1).unsqueeze(1)
 
             if args.bow_norm:
@@ -1231,8 +1295,8 @@ if args.mode == 'train':
     for epoch in range(1, args.epochs):
         train(epoch)
         
-        if epoch % args.visualize_every == 0:
-            visualize()
+        # if epoch % args.visualize_every == 0:
+        #     visualize()
         
         # print(model.classifier.weight)
 
@@ -1243,19 +1307,19 @@ if args.mode == 'train':
             writer.add_scalar('PPL/val', val_ppl, epoch)
         else:
             wandb.log({'PPL/val': val_ppl, 'epoch': epoch})
-        if (epoch - 1) % 5 == 0:
-            tq, tc, td = get_topic_quality()
-            if args.logger == 'tb':
-                writer.add_scalar('Topic/quality', tq, epoch)
-                writer.add_scalar('Topic/coherence', tc, epoch)
-                writer.add_scalar('Topic/diversity', td, epoch)
-            else:
-                wandb.log({
-                    'Topic/quality': tq,
-                    'Topic/coherence': tc,
-                    'Topic/diversity': td,
-                    'epoch': epoch,
-                })
+        # if (epoch - 1) % 5 == 0:
+        #     tq, tc, td = get_topic_quality()
+        #     if args.logger == 'tb':
+        #         writer.add_scalar('Topic/quality', tq, epoch)
+        #         writer.add_scalar('Topic/coherence', tc, epoch)
+        #         writer.add_scalar('Topic/diversity', td, epoch)
+        #     else:
+        #         wandb.log({
+        #             'Topic/quality': tq,
+        #             'Topic/coherence': tc,
+        #             'Topic/diversity': td,
+        #             'epoch': epoch,
+        #         })
         if args.predict_cnpi:
             # cnpi top k recall on validation set
             val_cnpi_results = get_cnpi_top_k_metrics(cnpis, cnpi_mask, 'val')
@@ -1336,7 +1400,7 @@ if args.mode == 'train':
         f.write(s1)
         f.close()
 else: 
-    with open(os.path.join(ckpt, 'model.pt'), 'rb') as f:
+    with open(os.path.join(args.load_from, 'model.pt'), 'rb') as f:
         model = torch.load(f)
     model = model.to(device)
 
@@ -1381,6 +1445,10 @@ if args.mode == 'train':
     with open(os.path.join(ckpt, 'config.json'), 'w') as file:
         json.dump(config_dict, file)
 
+print('saving training eta ...')
+eta = get_eta('train').cpu().detach().numpy()
+np.save(os.path.join(ckpt, 'eta.npy'), eta, allow_pickle=False)
+
 print('saving evaluation eta ...')
 eta = get_eta('val').cpu().detach().numpy()
 # np.save(ckpt+'_eta.npy', eta, allow_pickle=False)
@@ -1393,6 +1461,11 @@ np.save(os.path.join(ckpt, 'eta_test.npy'), eta, allow_pickle=False)
 
 print('computing validation perplexity...')
 val_ppl, val_pdl = get_completion_ppl('val')
+
+print("getting theta for train/val/test")
+for split in ["train", "val", "test"]:
+    thetas = get_theta_for_source(split).cpu().detach().numpy()
+    np.save(os.path.join(ckpt, f"theta_{split}.npy"), thetas, allow_pickle=False)
 
 if args.predict_labels:
     # document labels prediction on validation set
