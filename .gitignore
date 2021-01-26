@@ -12,3 +12,5 @@ code/MixMedia_old/wandb/*
 code/MixMedia/wandb/*
 code/RNN_cnpi_baseline/wandb/*
 code/RNN_eta/wandb/*
+code/longformer/*
+code/transfer_learning/wandb/*
