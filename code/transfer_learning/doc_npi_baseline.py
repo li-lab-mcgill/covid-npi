@@ -198,14 +198,14 @@ if __name__ == "__main__":
             model.train()
             for batch_idx, idxs in enumerate(train_loader):
                 pred = model(train_bow[idxs])
-                train_loss += \
-                    torch.dot(class_weight,
+                loss = torch.dot(class_weight,
                             F.binary_cross_entropy_with_logits(pred, train_labels[idxs], reduction="none").mean(dim=0))
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item()
                 all_preds.append(pred.detach())
                 all_labels.append(train_labels[idxs])
             train_loss = train_loss / (batch_idx + 1)
-            train_loss.backward()
-            optimizer.step()
 
             auprc_breakdown = compute_auprc_breakdown(torch.cat(all_labels, dim=0), torch.cat(all_preds, dim=0))  
             label_cnts_normed = get_label_supports(torch.cat(all_labels, dim=0))
@@ -220,10 +220,10 @@ if __name__ == "__main__":
                 model.eval()
                 for batch_idx, idxs in enumerate(test_loader):
                     pred = model(test_bow[idxs])
-                    test_loss += \
-                        torch.dot(class_weight, \
+                    loss = torch.dot(class_weight, \
                             F.binary_cross_entropy_with_logits(pred, test_labels[idxs], reduction="none").mean(dim=0))
-                    all_preds.append(pred)
+                    test_loss += loss.item()
+                    all_preds.append(pred.detach())
                 test_loss = test_loss / (batch_idx + 1)
 
                 if args.save_ckpt and (best_test_loss is None or test_loss < best_test_loss):
@@ -253,7 +253,8 @@ if __name__ == "__main__":
         if not args.no_logger:
             wandb_run.finish()
 
-        print(torch.cuda.memory_summary())
+        del model
+        del optimizer
 
     # print and save results
     print(f"AUPRCs")
