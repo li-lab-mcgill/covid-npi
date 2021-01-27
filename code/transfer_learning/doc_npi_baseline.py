@@ -21,7 +21,7 @@ def parse_args():
 
     # training args
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
-    parser.add_argument("--batch_size", type=int, default=128, help="batch size")
+    parser.add_argument("--batch_size", type=int, default=2048, help="batch size")
     parser.add_argument("--epochs", type=int, default=100, help="epochs")
     parser.add_argument("--weight_decay", type=float, default=2e-3, help="weight decay")
     parser.add_argument("--hidden_size", type=int, default=256, help="hidden size (only effective when non-linear)")
@@ -64,6 +64,7 @@ def build_model(args):
             )
         ).to(device)
 
+@torch.no_grad()
 def compute_auprc_breakdown(labels, predictions, average=None):
     '''
     inputs:
@@ -85,6 +86,7 @@ def compute_auprc_breakdown(labels, predictions, average=None):
     predictions = predictions.cpu().numpy()
     return average_precision_score(labels, predictions, average=average)
 
+@torch.no_grad()
 def get_label_supports(labels):
     label_cnts = labels.sum(0).tolist()
     return np.array(label_cnts) / np.sum(label_cnts)
@@ -182,7 +184,6 @@ if __name__ == "__main__":
         if not args.no_logger:
             tags = ['Doc NPI baseline', 'Linear' if args.linear else 'Nonlinear']
             wandb_run = wandb.init(name=f"{exp_time_stamp}_{seed}", project="covid", group=exp_time_stamp, config=args, tags=tags)
-            wandb.watch(model)
 
         optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
@@ -266,6 +267,13 @@ if __name__ == "__main__":
     print(f" - test: {np.max(all_test_macro_auprcs, axis=1).mean():.3f} ({np.max(all_test_macro_auprcs, axis=1).std():.3f})")
 
     if args.save_ckpt:
+        # save the raw auprcs
+        np.save(os.path.join(save_dir, "all_train_weighted_auprcs.npy"), np.vstack(all_train_weighted_auprcs))
+        np.save(os.path.join(save_dir, "all_test_weighted_auprcs.npy"), np.vstack(all_test_weighted_auprcs))
+        np.save(os.path.join(save_dir, "all_train_macro_auprcs.npy"), np.vstack(all_train_macro_auprcs))
+        np.save(os.path.join(save_dir, "all_test_macro_auprcs.npy"), np.vstack(all_test_macro_auprcs))
+
+        # save the aggregated auprcs
         results = {
             "weighted": {
                 "train": f"{np.max(all_train_weighted_auprcs, axis=1).mean():.3f} ({np.max(all_train_weighted_auprcs, axis=1).std():.3f})",
