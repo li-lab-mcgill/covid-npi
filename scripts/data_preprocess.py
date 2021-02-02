@@ -612,7 +612,7 @@ def contains_punctuation(w):
 def contains_numeric(w):
     return any(char.isdigit() for char in w)
 
-def preprocess(train_data, test_data, full_data, get_q_theta_data):
+def preprocess(train_data, test_data, full_data, get_q_theta_data, dataset):
 
     # remove all special characters from the text data
     print("Remove special characters")
@@ -650,7 +650,9 @@ def preprocess(train_data, test_data, full_data, get_q_theta_data):
         # init_docs_embs, init_docs_embs_idxs = [], []
         for doc in tqdm(init_docs):
             embs, embs_idxs = tokenizer.prepare_sequence(doc)
-            q_theta_data['init_docs_embs'].append(embs)
+            if dataset != "aylien":
+                # aylien is too large for all doc embeddings to be computed
+                q_theta_data['init_docs_embs'].append(embs)
             q_theta_data['init_docs_embs_idxs'].append(embs_idxs)
 
         # prepare ELECTRA word embeddings
@@ -860,10 +862,11 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
 
     # Split in train/test/valid
     docs_tr = [[word2id[w] for w in init_docs[idx_permute[idx_d]].split() if w in word2id] for idx_d in range(trSize)]
-    if all_docs_embs:   # if not outputing embeddings, this would be an empty list (see preprocess)
-        docs_embs_tr = [all_docs_embs[idx_permute[idx_d]] for idx_d in range(trSize)]
-        docs_embs_idxs_tr = [all_docs_embs_idxs[idx_permute[idx_d]] for idx_d in range(trSize)]
-        docs_electra_idxs_tr = [all_docs_electra_idxs[idx_permute[idx_d]] for idx_d in range(trSize)]
+    if q_theta_data["init_docs_embs_idxs"]:   # if not outputing embeddings, this would be an empty list (see preprocess)
+        docs_embs_tr = [q_theta_data["init_docs_embs"][idx_permute[idx_d]] for idx_d in range(trSize)] \
+            if dataset != "aylien" else []
+        docs_embs_idxs_tr = [q_theta_data["init_docs_embs_idxs"][idx_permute[idx_d]] for idx_d in range(trSize)]
+        docs_electra_idxs_tr = [q_theta_data["init_docs_electra_idxs"][idx_permute[idx_d]] for idx_d in range(trSize)]
         # create list of unseen idxs in trainning set
         embs_idxs_seen = set(idx for docs_embs_idx_tr in docs_embs_idxs_tr for idx in docs_embs_idx_tr)
         print("q_theta vocab size", len(embs_idxs_seen))
@@ -883,19 +886,21 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     labels_tr = [data_labels[idx_permute[idx_d]] for idx_d in range(trSize)] if dataset is not 'aylien' else []
 
     docs_va = [[word2id[w] for w in init_docs[idx_permute[idx_d+trSize]].split() if w in word2id] for idx_d in range(vaSize)]
-    if all_docs_embs:
-        docs_embs_va = [all_docs_embs[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
-        docs_embs_idxs_va = [all_docs_embs_idxs[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
-        docs_electra_idxs_va = [all_docs_electra_idxs[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
+    if q_theta_data["init_docs_embs_idxs"]:
+        docs_embs_va = [q_theta_data["init_docs_embs"][idx_permute[idx_d+trSize]] for idx_d in range(vaSize)] \
+            if dataset != "aylien" else []
+        docs_embs_idxs_va = [q_theta_data["init_docs_embs_idxs"][idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
+        docs_electra_idxs_va = [q_theta_data["init_docs_electra_idxs"][idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
 
     if dataset == 'who':
         who_ids_va = [who_ids[idx_permute[idx_d+trSize]] for idx_d in range(vaSize)]
 
-    if all_docs_embs:
+    if q_theta_data["init_docs_embs_idxs"]:
         for doc_idx, docs_embs_idx_va in tqdm(enumerate(docs_embs_idxs_va)):
             mask = [emb_idx in embs_idxs_seen for emb_idx in docs_embs_idx_va]
             docs_embs_idxs_va[doc_idx] = np.array(list(itertools.compress(docs_embs_idx_va, mask)))
-            docs_embs_va[doc_idx] = np.array(list(itertools.compress(docs_embs_va[doc_idx], mask)))
+            if dataset != "aylien":
+                docs_embs_va[doc_idx] = np.array(list(itertools.compress(docs_embs_va[doc_idx], mask)))
             docs_electra_idxs_va[doc_idx] = np.array(list(itertools.compress(docs_electra_idxs_va[doc_idx], mask)))
     timestamps_va = [time2id[init_timestamps[idx_permute[idx_d+trSize]]] for idx_d in range(vaSize)]
     if not full_data:
@@ -910,19 +915,21 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
 
 
     docs_ts = [[word2id[w] for w in init_docs[idx_d+num_docs_tr].split() if w in word2id] for idx_d in range(tsSize)]
-    if all_docs_embs:
-        docs_embs_ts = [all_docs_embs[idx_d+num_docs_tr] for idx_d in range(tsSize)]
-        docs_embs_idxs_ts = [all_docs_embs_idxs[idx_d+num_docs_tr] for idx_d in range(tsSize)]
-        docs_electra_idxs_ts = [all_docs_electra_idxs[idx_d+num_docs_tr] for idx_d in range(tsSize)]
+    if q_theta_data["init_docs_embs_idxs"]:
+        docs_embs_ts = [q_theta_data["init_docs_embs"][idx_d+num_docs_tr] for idx_d in range(tsSize)] \
+            if dataset != "aylien" else []
+        docs_embs_idxs_ts = [q_theta_data["init_docs_embs_idxs"][idx_d+num_docs_tr] for idx_d in range(tsSize)]
+        docs_electra_idxs_ts = [q_theta_data["init_docs_electra_idxs"][idx_d+num_docs_tr] for idx_d in range(tsSize)]
 
     if dataset == 'who':
         who_ids_ts = [who_ids[idx_d+num_docs_tr] for idx_d in range(tsSize)]
 
-    if all_docs_embs:
+    if q_theta_data["init_docs_embs_idxs"]:
         for doc_idx, docs_embs_idx_ts in tqdm(enumerate(docs_embs_idxs_ts)):
             mask = [emb_idx in embs_idxs_seen for emb_idx in docs_embs_idx_ts]
             docs_embs_idxs_ts[doc_idx] = np.array(list(itertools.compress(docs_embs_idx_ts, mask)))
-            docs_embs_ts[doc_idx] = np.array(list(itertools.compress(docs_embs_ts[doc_idx], mask)))
+            if dataset != "aylien":
+                docs_embs_ts[doc_idx] = np.array(list(itertools.compress(docs_embs_ts[doc_idx], mask)))
             docs_electra_idxs_ts[doc_idx] = np.array(list(itertools.compress(docs_electra_idxs_ts[doc_idx], mask)))
     print(len(docs_ts))
     #exit()
@@ -966,14 +973,17 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     timestamps_va = [timestamps_va[idx] for idx in preserve_idxs_va]
     countries_va = [countries_va[idx] for idx in preserve_idxs_va]
 
-    if all_docs_embs:
-        docs_embs_tr = [docs_embs_tr[idx] for idx in preserve_idxs_tr]
+    if q_theta_data["init_docs_embs_idxs"]:
+        if dataset != "aylien":
+            docs_embs_tr = [docs_embs_tr[idx] for idx in preserve_idxs_tr]
         docs_embs_idxs_tr = [docs_embs_idxs_tr[idx] for idx in preserve_idxs_tr]
         docs_electra_idxs_tr = [docs_electra_idxs_tr[idx] for idx in preserve_idxs_tr]
-        docs_embs_ts = [docs_embs_ts[idx] for idx in preserve_idxs_ts]
+        if dataset != "aylien":
+            docs_embs_ts = [docs_embs_ts[idx] for idx in preserve_idxs_ts]
         docs_embs_idxs_ts = [docs_embs_idxs_ts[idx] for idx in preserve_idxs_ts]
         docs_electra_idxs_ts = [docs_electra_idxs_ts[idx] for idx in preserve_idxs_ts]
-        docs_embs_va = [docs_embs_va[idx] for idx in preserve_idxs_va]
+        if dataset != "aylien":
+            docs_embs_va = [docs_embs_va[idx] for idx in preserve_idxs_va]
         docs_embs_idxs_va = [docs_embs_idxs_va[idx] for idx in preserve_idxs_va]
         docs_electra_idxs_va = [docs_electra_idxs_va[idx] for idx in preserve_idxs_va]
 
@@ -982,8 +992,9 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     docs_ts = [doc for doc in docs_ts if len(doc)>1]
     labels_ts = [lab for doc,lab in zip(docs_ts, labels_ts) if len(doc) > 1] if labels_ts else []
     id_ts = [id for doc, id in zip(docs_ts, ids_ts) if len(doc) > 1]
-    if all_docs_embs:
-        docs_embs_ts = [docs_embs_ts[idx] for idx in preserve_idxs_ts]
+    if q_theta_data["init_docs_embs_idxs"]:
+        if dataset != "aylien":
+            docs_embs_ts = [docs_embs_ts[idx] for idx in preserve_idxs_ts]
         docs_embs_idxs_ts = [docs_embs_idxs_ts[idx] for idx in preserve_idxs_ts]
         docs_electra_idxs_ts = [docs_electra_idxs_ts[idx] for idx in preserve_idxs_ts]
 
@@ -1008,11 +1019,13 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     print('splitting test documents in 2 halves...')
     docs_ts_h1 = [[w for i,w in enumerate(doc) if i<=len(doc)/2.0-1] for doc in docs_ts]
     docs_ts_h2 = [[w for i,w in enumerate(doc) if i>len(doc)/2.0-1] for doc in docs_ts]
-    if all_docs_embs:
-        docs_embs_ts_h1 = [doc_embs[: int(np.floor(doc_embs.shape[0]/2.0-1))] for doc_embs in docs_embs_ts]
+    if q_theta_data["init_docs_embs_idxs"]:
+        docs_embs_ts_h1 = [doc_embs[: int(np.floor(doc_embs.shape[0]/2.0-1))] for doc_embs in docs_embs_ts] \
+            if dataset != "aylien" else []
         docs_embs_idxs_ts_h1 = [doc_embs[: int(np.floor(doc_embs.shape[0]/2.0-1))] for doc_embs in docs_embs_idxs_ts]
         docs_electra_idxs_ts_h1 = [doc_embs[: int(np.floor(doc_embs.shape[0]/2.0-1))] for doc_embs in docs_electra_idxs_ts]
-        docs_embs_ts_h2 = [doc_embs[int(np.ceil(doc_embs.shape[0]/2.0-1)): ] for doc_embs in docs_embs_ts]
+        docs_embs_ts_h2 = [doc_embs[int(np.ceil(doc_embs.shape[0]/2.0-1)): ] for doc_embs in docs_embs_ts] \
+            if dataset != "aylien" else []
         docs_embs_idxs_ts_h2 = [doc_embs[int(np.ceil(doc_embs.shape[0]/2.0-1)): ] for doc_embs in docs_embs_idxs_ts]
         docs_electra_idxs_ts_h2 = [doc_embs[int(np.ceil(doc_embs.shape[0]/2.0-1)): ] for doc_embs in docs_electra_idxs_ts]
     if not full_data:
@@ -1099,7 +1112,7 @@ def split_data(init_docs, init_docs_tr, init_docs_ts, word2id, init_countries, i
     del doc_indices_ts_h2
     del doc_indices_va
 
-    if all_docs_embs:
+    if q_theta_data["init_docs_embs_idxs"]:
         q_theta_data = {
             "docs_embs_tr": docs_embs_tr,
             "docs_embs_idxs_tr": docs_embs_idxs_tr,
@@ -1353,7 +1366,7 @@ if __name__ == '__main__':
     print("Preprocessing the articles")
     #print(train.data)
     all_docs, train_docs, test_docs, init_countries, init_ids, init_timestamps, data_labels, q_theta_data = \
-        preprocess(train, test, args.full_data, args.get_q_theta_data)
+        preprocess(train, test, args.full_data, args.get_q_theta_data, dataset)
 
     # get a list of stopwords
     #stopwords_en, stopwords_fr = get_stopwords(args.stopwords_path)
