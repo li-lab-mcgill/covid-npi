@@ -14,7 +14,7 @@ def parse_args():
 
     # data io args
     parser.add_argument("--eta_dir", type=str, required=True, help="directory containing eta")
-    parser.add_argument("--theta_dir", type=str, required=True, help="directory containing theta")
+    parser.add_argument("--theta_dir", type=str, help="directory containing theta")
     parser.add_argument("--who_label_dir", type=str, help="directory containing who labels")
     parser.add_argument("--cnpi_dir", type=str, help="directory containing country npis")
     parser.add_argument("--ckpt_dir", type=str, help="directory to save checkpoints")
@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
     # validity check
     if args.mode == "doc":
-        for arg in ["who_label_dir"]:
+        for arg in ["who_label_dir", "theta_dir"]:
             if not configs[arg]:
                 raise Exception(f"{arg} is needed for document npi prediction")
     else:
