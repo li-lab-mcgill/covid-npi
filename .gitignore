@@ -2,7 +2,6 @@
 scripts/fasttext_cache/crawl-300d-2M-subword.bin
 *.txt
 code/MixMedia/__pycache__/data.cpython-37.pyc
-code/run_MixMedia.sh
 code/MixMedia/__pycache__/utils.cpython-37.pyc
 code/MixMedia/runs/*
 code/MixMedia_old/runs/*
