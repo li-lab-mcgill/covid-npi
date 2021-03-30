@@ -1,14 +1,7 @@
-# Mining international COVID19 media data using dynamic multi-modal embedded topic model
+# Global-scale prediction of country-level non-pharmacological interventions using a dynamic embedded topic model applied to online media
 
-## Motivation:
+## Data processing
 
-## Methods: Multi-source semi-supervised dynamic embedded topic model (MS-D-ETM)
+## Running MixMedia
 
-## Data: Media news data processing (WHO and GPHIN_official)
-
-## Results: 
-
-## Conclusion
-
-
- 
+## Transfer learning for NPI prediction
