@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument("--theta_dir", type=str, help="directory containing theta")
     parser.add_argument("--who_label_dir", type=str, help="directory containing who labels")
     parser.add_argument("--cnpi_dir", type=str, help="directory containing country npis")
-    parser.add_argument("--ckpt_dir", type=str, help="directory to save checkpoints")
+    parser.add_argument("--ckpt_dir", type=str, help="directory to load checkpoints from")
     parser.add_argument("--save_dir", type=str, help="root directory to save output")
 
     # experiments args
