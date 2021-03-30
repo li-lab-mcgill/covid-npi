@@ -108,7 +108,7 @@ CUDA_VISIBLE_DEVICES=${cuda} python classify_npi.py \
     # --quiet \ # not showing progress bar
 ```
 
-Note that `classify_npi.py` and `classify_npi.sh` supports all types of NPI predictions, including at the document level, transferring to country-level as well as random baselines. The specific mode of NPI prediction is specified by the `mode` argument. Depending on the mode, some other optional arguments might be required.
+Note that `classify_npi.py` and `classify_npi.sh` support all types of NPI predictions, including at the document level, transferring to country-level as well as random baselines. The specific mode of NPI prediction is specified by the `mode` argument. Depending on the mode, some other optional arguments might be required.
 
 For document-level NPI prediction, set `mode` to "doc" and provide `who_label_dir` and `theta_dir`.
 
