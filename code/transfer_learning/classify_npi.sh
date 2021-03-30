@@ -14,5 +14,5 @@ CUDA_VISIBLE_DEVICES=${cuda} python classify_npi.py \
     --epochs "# of training epochs" \
     --batch_size "batch size" \
     --weight_decay "weight decay for adam optimizer" \
-    # --save_ckpt \ save output to save_dir
-    # --quiet \ not showing progress bar
+    # --save_ckpt \ # save output to save_dir
+    # --quiet \ # not showing progress bar
