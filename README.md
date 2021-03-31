@@ -1,5 +1,7 @@
 # Global-scale prediction of country-level non-pharmacological interventions using a dynamic embedded topic model applied to online media
 
+(In submission)
+
 ## Data processing
 
 The Python script for data processing is `data_preprocess.py` under the folder `scripts`. The recommended way of using it is running `run_data_process.sh`. This script runs the following command:
