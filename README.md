@@ -15,7 +15,7 @@ python data_preprocess.py \
     # --aylien_flag 1 \ # if processing aylien data
     # --label_harm 1 \  # if harmonize (group) npis
 ```
-`data_preprocess.py` supports processing AYLIEN and WHO data, which is specified by `--aylien_flag` and `--who_flag`.
+`data_preprocess.py` supports processing AYLIEN and WHO data, which is specified by `--aylien_flag` and `--who_flag`. The harmonization of NPIs (grouping all NPIs into 15 groups) is done according to the mapping in `npi labels.xlsx`.
 
 The processed data, e.g. bag-of-words, will be stored in the output directory specified by `save_dir`. This should also be the input directory for running MixMedia (see below).
 
