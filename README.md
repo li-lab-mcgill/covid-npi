@@ -1,6 +1,20 @@
-# Global-scale prediction of country-level non-pharmacological interventions using a dynamic embedded topic model applied to online media
+# Inferring global-scale temporal latent topics from news reports to predict public health interventions for COVID-19
 
-(In submission)
+[Published](https://www.cell.com/patterns/fulltext/S2666-3899(22)00002-2) in Patterns. If you find this work helpful, please cite as
+
+```
+@article{WEN2022100435,
+title = {Inferring global-scale temporal latent topics from news reports to predict public health interventions for COVID-19},
+journal = {Patterns},
+pages = {100435},
+year = {2022},
+issn = {2666-3899},
+doi = {https://doi.org/10.1016/j.patter.2022.100435},
+url = {https://www.sciencedirect.com/science/article/pii/S2666389922000022},
+author = {Zhi Wen and Guido Powell and Imane Chafi and David L. Buckeridge and Yue Li},
+keywords = {latent topic models, transfer learning, variational autoencoder, non-pharmacological interventions, COVID-19, public health surveillance}
+}
+```
 
 ## Data processing
 
