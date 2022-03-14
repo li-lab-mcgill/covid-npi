@@ -1,5 +1,7 @@
 # Inferring global-scale temporal latent topics from news reports to predict public health interventions for COVID-19
 
+[![DOI](https://zenodo.org/badge/353421711.svg)](https://zenodo.org/badge/latestdoi/353421711)
+
 [Published](https://www.cell.com/patterns/fulltext/S2666-3899(22)00002-2) in Patterns. If you find this work helpful, please cite as
 
 ```
