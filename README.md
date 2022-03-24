@@ -20,7 +20,9 @@ keywords = {latent topic models, transfer learning, variational autoencoder, non
 
 ## Data processing
 
-The Python script for data processing is `data_preprocess.py` under the folder `scripts`. The recommended way of using it is running `run_data_process.sh`. This script runs the following command:
+### 1. AYLIEN
+
+The Python script for AYLIEN data processing is `data_preprocess.py` under the folder `scripts`. The recommended way of using it is running `run_data_process.sh`. This script runs the following command:
 
 ```bash
 python data_preprocess.py \
@@ -28,12 +30,26 @@ python data_preprocess.py \
     --stopwords_path "path to stop words file" \
     --cnpi_labels_path "path to file containing country npis" \
     --save_dir "directory to save output" \
-    # --aylien_flag 1 \ # if processing aylien data
+    --aylien_flag 1 \
     # --label_harm 1 \  # if harmonize (group) npis
 ```
-`data_preprocess.py` supports processing AYLIEN and WHO data, which is specified by `--aylien_flag` and `--who_flag`. The harmonization of NPIs (grouping all NPIs into 15 groups) is done according to the mapping in `npi labels.xlsx`.
+`data_preprocess.py` supports processing AYLIEN and WHO data, with `--aylien_flag` set to 1 it would expect to process AYLIEN data. The harmonization of NPIs (grouping all NPIs into 15 groups) is done according to the mapping in `npi labels.xlsx`.
 
 The processed data, e.g. bag-of-words, will be stored in the output directory specified by `save_dir`. This should also be the input directory for running MixMedia (see below).
+
+### 2. WHO
+
+The Python script for WHO data processing is `who_data_process.py` under the folder `scripts`. WHO data should be processed *after* an MixMedia model is trained on AYLIEN data, since it relies on some of its output files (and input files). The recommended way of using the script is running `run_who_data_process.sh`. This script runs the following command:
+
+```bash
+python who_data_process.py \
+    --who_data_path "path to csv file containing WHO news reports and their dates, countries, etc." \
+    --aylien_dir "directory containing the preprocessed AYLIEN data, including mappings of time and source, as well as the vocab" \
+    --eta_path "path to the inferred eta file, which sould be in the outputs of running EpiTopics on AYLIEN" \
+    --save_dir "directory to save output" \
+```
+
+The processed data, including bag-of-words, merged WHO data, and merged country topic priors (etas), will be stored in the output directory specified by `save_dir`. This should also be the input directory for inferring WHO documents' topic mixtures (see below).
 
 ## Running MixMedia
 
